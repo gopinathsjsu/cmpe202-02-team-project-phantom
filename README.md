@@ -2,7 +2,9 @@
 
 
 Team Name: Phantom 
-![Team banner](https://i.imgur.com/DnrTnYn.png)
+![Project System Design](
+  https://i.imgur.com/vmw49xm.png
+)
 
 Team Members: Kunal Keshav Singh Sahni, Nikhil Raj Singh, Dan Lam
 
