@@ -1,5 +1,6 @@
 services:
   db:
+    container_name: db
     image: postgres:16
     restart: unless-stopped
     env_file: .env
@@ -31,19 +32,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-
-  search-agent:
-    build: ./search-agent
-    container_name: search-agent
-    env_file:
-      - ./.env
-      - ./search-agent/.env
-    ports:
-      - "${SEARCHAGENT_PORT}:${SEARCHAGENT_PORT}"
-    environment:
-      DB_HOST: db
-    depends_on:
-      db:
-        condition: service_healthy      
+     
 volumes:
   pgdata:

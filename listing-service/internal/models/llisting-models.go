@@ -1,4 +1,4 @@
-package listing
+package models
 
 import "time"
 
@@ -17,6 +17,21 @@ const (
 	StSold      Status = "SOLD"
 	StArchived  Status = "ARCHIVED"
 )
+
+var AllCategories = []Category{
+	CatTextbook,
+	CatGadget,
+	CatEssential,
+	CatNonEssential,
+	CatOther,
+}
+
+var AllStatuses = []Status{
+	StAvailable,
+	StPending,
+	StSold,
+	StArchived,
+}
 
 type Listing struct {
 	ID          int64     `json:"id"`
@@ -45,7 +60,7 @@ type UpdateParams struct {
 }
 
 type ListFilters struct {
-	Keywords *string   `json:"keywords,omitempty"`
+	Keywords []string  `json:"keywords,omitempty"`
 	Category *Category `json:"category,omitempty"`
 	Status   *Status   `json:"status,omitempty"`
 	MinPrice *int64    `json:"min_price,omitempty"`

@@ -1,4 +1,4 @@
-module github.com/your-org/listings-service
+module github.com/your-org/listing-service
 
 go 1.22
 

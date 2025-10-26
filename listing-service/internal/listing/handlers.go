@@ -2,14 +2,21 @@ package listing
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/your-org/listings-service/internal/platform"
+	"github.com/your-org/listing-service/internal/gemini"
+	"github.com/your-org/listing-service/internal/models"
+	"github.com/your-org/listing-service/internal/platform"
 )
 
-type Handlers struct{ S *Store }
+type Handlers struct {
+	AI *gemini.Client
+	S  *Store
+}
 
 func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	userID, ok := platform.UserIDFromHeader(r)
@@ -18,7 +25,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var p CreateParams
+	var p models.CreateParams
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		platform.Error(w, http.StatusBadRequest, "invalid json")
 		return
@@ -48,20 +55,20 @@ func (h *Handlers) Get(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := ListFilters{
+	f := models.ListFilters{
 		Limit:  parseInt(q.Get("limit"), 20),
 		Offset: parseInt(q.Get("offset"), 0),
 		Sort:   q.Get("sort"),
 	}
-	if s := q.Get("q"); s != "" {
-		f.Q = &s
+	if s := q.Get("keywords"); s != "" {
+		f.Keywords = strings.Fields(s)
 	}
 	if s := q.Get("category"); s != "" {
-		c := Category(s)
+		c := models.Category(s)
 		f.Category = &c
 	}
 	if s := q.Get("status"); s != "" {
-		st := Status(s)
+		st := models.Status(s)
 		f.Status = &st
 	}
 	if s := q.Get("min_price"); s != "" {
@@ -73,7 +80,7 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 		f.MaxPrice = &v
 	}
 
-	items, err := h.S.List(r.Context(), f)
+	items, err := h.S.List(r.Context(), &f)
 	if err != nil {
 		platform.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -89,7 +96,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	var p UpdateParams
+	var p models.UpdateParams
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		platform.Error(w, http.StatusBadRequest, "invalid json")
 		return
@@ -116,6 +123,43 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	platform.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handlers) ChatSearch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Query string `json:"query"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Query == "" {
+		http.Error(w, "Query cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Received search query: %s", req.Query)
+
+	searchParams, err := h.AI.GetSearchParams(r.Context(), req.Query)
+	if err != nil {
+		log.Printf("ERROR getting search params from AI: %v", err)
+		http.Error(w, "Failed to understand query", http.StatusInternalServerError)
+		return
+	}
+
+	listings, err := h.S.List(r.Context(), searchParams)
+	if err != nil {
+		log.Printf("ERROR finding listings in database: %v", err)
+		http.Error(w, "Failed to retrieve listings", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Found %d listings for query '%s'", len(listings), req.Query)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(listings)
 }
 
 func parseInt(s string, def int) int {

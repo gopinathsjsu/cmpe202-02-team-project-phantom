@@ -8,10 +8,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/Nikhil1169/search-agent/internal/model"
+	"github.com/your-org/listing-service/internal/models"
 )
 
 // --- THIS IS THE UPDATED URL ---
@@ -29,16 +30,16 @@ func NewClient() *Client {
 	}
 }
 
-func (c *Client) GetSearchParams(ctx context.Context, userQuery string) (*model.SearchParams, error) {
+func (c *Client) GetSearchParams(ctx context.Context, userQuery string) (*models.ListFilters, error) {
 	if c.apiKey == "" {
 		return nil, fmt.Errorf("GOOGLE_API_KEY environment variable not set")
 	}
 
 	prompt := getPrompt(userQuery) // Assumes getPrompt() function exists in this file
 
-	apiReq := model.GeminiRequest{
-		Contents: []model.Content{
-			{Parts: []model.Part{{Text: prompt}}},
+	apiReq := models.GeminiRequest{
+		Contents: []models.Content{
+			{Parts: []models.Part{{Text: prompt}}},
 		},
 	}
 
@@ -65,7 +66,7 @@ func (c *Client) GetSearchParams(ctx context.Context, userQuery string) (*model.
 		return nil, fmt.Errorf("gemini API returned non-200 status: %s", resp.Status)
 	}
 
-	var apiResp model.GeminiResponse
+	var apiResp models.GeminiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return nil, fmt.Errorf("error decoding gemini response: %w", err)
 	}
@@ -83,7 +84,12 @@ func (c *Client) GetSearchParams(ctx context.Context, userQuery string) (*model.
 	cleanedContent = strings.TrimSuffix(cleanedContent, "```")
 	cleanedContent = strings.TrimSpace(cleanedContent)
 
-	var searchParams model.SearchParams
+	searchParams := models.ListFilters{
+		Limit:  20,
+		Offset: 0,
+		Sort:   "created_desc",
+	}
+
 	err = json.Unmarshal([]byte(cleanedContent), &searchParams)
 	if err != nil {
 		return nil, fmt.Errorf("error unmarshalling search params from gemini response: %w", err)
@@ -98,7 +104,7 @@ Your sole purpose is to analyze a user's query and expand it with synonyms to cr
 You must respond ONLY with a valid JSON object. Do not include markdown formatting like '\' '\' '\' json, greetings, or any other explanatory text.
 
 The JSON object should have the following optional fields:
-- "category": string (one of: "textbooks", "gadgets", "essentials", "other")
+- "category": string (one of: %s)
 - "keywords": array of strings (Include the original keyword plus relevant synonyms or specific examples. Be creative.)
 - "min_price": number
 - "max_price": number
@@ -122,5 +128,34 @@ Your JSON response:
 Analyze the following user query and provide the JSON output immediately.
 
 User query: "%s"
-`, userQuery)
+`, CategoriesAsString(), userQuery)
+}
+
+func parseInt(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return v
+}
+func parseInt64(s string, def int64) int64 {
+	if s == "" {
+		return def
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+func CategoriesAsString() string {
+	cats := make([]string, len(models.AllCategories))
+	for i, c := range models.AllCategories {
+		cats[i] = fmt.Sprintf(`"%s"`, c)
+	}
+	return strings.Join(cats, ",")
 }

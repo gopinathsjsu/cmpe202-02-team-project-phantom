@@ -3,10 +3,13 @@ package listing
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/your-org/listing-service/internal/models"
 )
 
 // Better: pass *pgxpool.Pool and open per-call connections
@@ -18,48 +21,46 @@ type PgxPool interface {
 
 type Store struct{ P PgxPool }
 
-func (s *Store) Create(ctx context.Context, userID int64, p CreateParams) (Listing, error) {
+func (s *Store) Create(ctx context.Context, userID int64, p models.CreateParams) (models.Listing, error) {
 	const q = `
     INSERT INTO listings(title, description, price, category, user_id)
     VALUES ($1,$2,$3,$4,$5)
     RETURNING id, title, description, price, category, user_id, status, created_at`
-	var l Listing
+	var l models.Listing
 	err := s.P.QueryRow(ctx, q, p.Title, p.Description, p.Price, p.Category, userID).
 		Scan(&l.ID, &l.Title, &l.Description, &l.Price, &l.Category, &l.UserID, &l.Status, &l.CreatedAt)
 	return l, err
 }
 
-func (s *Store) Get(ctx context.Context, id int64) (Listing, error) {
+func (s *Store) Get(ctx context.Context, id int64) (models.Listing, error) {
 	const q = `SELECT id,title,description,price,category,user_id,status,created_at FROM listings WHERE id=$1`
-	var l Listing
+	var l models.Listing
 	err := s.P.QueryRow(ctx, q, id).
 		Scan(&l.ID, &l.Title, &l.Description, &l.Price, &l.Category, &l.UserID, &l.Status, &l.CreatedAt)
 	return l, err
 }
 
-type ListFilters struct {
-	Q        *string
-	Category *Category
-	Status   *Status
-	MinPrice *int64
-	MaxPrice *int64
-	Limit    int
-	Offset   int
-	Sort     string // "created_at_desc", "price_asc", etc.
-}
-
-func (s *Store) List(ctx context.Context, f ListFilters) ([]Listing, error) {
+func (s *Store) List(ctx context.Context, f *models.ListFilters) ([]models.Listing, error) {
 	sb := strings.Builder{}
 	sb.WriteString(`SELECT id,title,description,price,category,user_id,status,created_at FROM listings`)
 	var where []string
 	var args []any
 	i := 1
 
-	if f.Q != nil && *f.Q != "" {
-		where = append(where, fmt.Sprintf("(title ILIKE $%d OR description ILIKE $%d)", i, i+1))
-		args = append(args, "%"+*f.Q+"%", "%"+*f.Q+"%")
-		i += 2
+	if len(f.Keywords) > 0 {
+		var words []string
+		temp := strings.Builder{}
+		temp.WriteString("(")
+		for _, kw := range f.Keywords {
+			words = append(words, fmt.Sprintf("(title ILIKE $%d OR description ILIKE $%d)", i, i+1))
+			args = append(args, "%"+kw+"%", "%"+kw+"%")
+			i += 2
+		}
+		temp.WriteString(strings.Join(words, " OR "))
+		temp.WriteString(")")
+		where = append(where, temp.String())
 	}
+
 	if f.Category != nil {
 		where = append(where, fmt.Sprintf("category = $%d", i))
 		args = append(args, *f.Category)
@@ -99,15 +100,17 @@ func (s *Store) List(ctx context.Context, f ListFilters) ([]Listing, error) {
 	}
 	sb.WriteString(fmt.Sprintf(" LIMIT %d OFFSET %d", f.Limit, f.Offset))
 
+	log.Println("List SQL Query: \n", FormatQuery(sb.String(), args))
+
 	rows, err := s.P.Query(ctx, sb.String(), args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []Listing
+	var out []models.Listing
 	for rows.Next() {
-		var l Listing
+		var l models.Listing
 		if err := rows.Scan(&l.ID, &l.Title, &l.Description, &l.Price, &l.Category, &l.UserID, &l.Status, &l.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -116,7 +119,7 @@ func (s *Store) List(ctx context.Context, f ListFilters) ([]Listing, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) Update(ctx context.Context, id int64, userid int64, p UpdateParams) (Listing, error) {
+func (s *Store) Update(ctx context.Context, id int64, userid int64, p models.UpdateParams) (models.Listing, error) {
 	// build dynamic SET
 	var sets []string
 	var args []any
@@ -160,7 +163,7 @@ func (s *Store) Update(ctx context.Context, id int64, userid int64, p UpdatePara
 	)
 	args = append(args, id)
 
-	var l Listing
+	var l models.Listing
 	err := s.P.QueryRow(ctx, q, args...).
 		Scan(&l.ID, &l.Title, &l.Description, &l.Price, &l.Category, &l.UserID, &l.Status, &l.CreatedAt)
 	return l, err
@@ -174,4 +177,16 @@ func (s *Store) Archive(ctx context.Context, id int64) error {
 func (s *Store) Delete(ctx context.Context, id int64) error {
 	_, err := s.P.Exec(ctx, `DELETE FROM listings WHERE id=$1`, id)
 	return err
+}
+
+func FormatQuery(query string, args []any) string {
+	formatted := query
+	for i, arg := range args {
+		// convert argument to string safely
+		val := fmt.Sprintf("'%v'", arg)
+		// replace first occurrence of $1, $2, ...
+		placeholder := fmt.Sprintf("$%d", i+1)
+		formatted = strings.Replace(formatted, placeholder, val, 1)
+	}
+	return formatted
 }

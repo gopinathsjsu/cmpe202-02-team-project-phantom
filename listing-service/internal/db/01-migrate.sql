@@ -1,6 +1,6 @@
 -- 1) Enums
 DO $$ BEGIN
-CREATE TYPE LISTING_CATEGORY AS ENUM ('textbooks', 'gadgets', 'essentials', 'other');
+CREATE TYPE LISTING_CATEGORY AS ENUM ('TEXTBOOK', 'GADGET', 'ESSENTIAL', 'NON-ESSENTIAL', 'OTHER');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN

@@ -10,8 +10,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
 
-	"github.com/your-org/listings-service/internal/listing"
-	"github.com/your-org/listings-service/internal/platform"
+	"github.com/your-org/listing-service/internal/gemini"
+	"github.com/your-org/listing-service/internal/listing"
+	"github.com/your-org/listing-service/internal/platform"
 )
 
 func main() {
@@ -21,17 +22,22 @@ func main() {
 	pool := platform.MustPGPool(ctx) // panic fast if DB is wrong
 	defer pool.Close()
 
+	// Repo Database Interface Layer being passed to the handler layer
 	store := &listing.Store{P: pool}
-	handlers := &listing.Handlers{S: store}
+
+	// --- Gemini AI Client ---
+	aiClient := gemini.NewClient()
+
+	handlers := &listing.Handlers{S: store, AI: aiClient}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger) // <-- built-in logger
 
 	r.Mount("/listings", listing.Routes(handlers))
 
-	log.Println("listening on", getenv("PORT", "8080"))
+	log.Println("listening on", getenv("LISTING_PORT", "8080"))
 
-	addr := ":" + getenv("PORT", "8080")
+	addr := ":" + getenv("LISTING_PORT", "8080")
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: r,
