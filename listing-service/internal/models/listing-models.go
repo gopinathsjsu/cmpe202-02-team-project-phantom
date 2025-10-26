@@ -11,11 +11,13 @@ const (
 	CatEssential    Category = "ESSENTIAL"
 	CatNonEssential Category = "NON-ESSENTIAL"
 	CatOther        Category = "OTHER"
+	CatTest         Category = "TEST"
 
 	StAvailable Status = "AVAILABLE"
 	StPending   Status = "PENDING"
 	StSold      Status = "SOLD"
 	StArchived  Status = "ARCHIVED"
+	StReported  Status = "REPORTED"
 )
 
 var AllCategories = []Category{
@@ -31,6 +33,7 @@ var AllStatuses = []Status{
 	StPending,
 	StSold,
 	StArchived,
+	StReported,
 }
 
 type Listing struct {

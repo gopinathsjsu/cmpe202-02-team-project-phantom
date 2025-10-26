@@ -8,7 +8,7 @@ WITH params AS (
 words AS (
   SELECT
     ARRAY['vintage','compact','sleek','premium','budget']                         AS adj,
-    ARRAY['keyboard','router','lamp','bottle','backpack']                         AS noun,
+    ARRAY['keyboard','router','lamp','bottle','backpack', 'textbook', 'computer'] AS noun,
     ARRAY['Like new','Gently used','Well-loved','Good condition']                 AS cond,
     enum_range(NULL::LISTING_CATEGORY)                                            AS cats,
     enum_range(NULL::LISTING_STATUS)                                              AS stats

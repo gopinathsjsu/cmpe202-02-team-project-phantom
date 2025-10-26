@@ -11,6 +11,7 @@ const (
 	CatEssential    Category = "ESSENTIAL"
 	CatNonEssential Category = "NON-ESSENTIAL"
 	CatOther        Category = "OTHER"
+	CatTest         Category = "TEST"
 
 	StAvailable Status = "AVAILABLE"
 	StPending   Status = "PENDING"
