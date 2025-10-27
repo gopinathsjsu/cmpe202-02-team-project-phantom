@@ -70,5 +70,5 @@ type ListFilters struct {
 	MaxPrice *int64    `json:"max_price,omitempty"`
 	Limit    int
 	Offset   int
-	Sort     string // "created_at_desc", "price_asc", etc.
+	Sort     string // "created_at_desc", "price_asc", "price_desc"
 }

@@ -110,14 +110,21 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
+	userID, ok := platform.UserIDFromHeader(r)
+	if !ok {
+		platform.Error(w, http.StatusUnauthorized, "missing user")
+		return
+	}
+
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if r.URL.Query().Get("hard") == "true" {
-		if err := h.S.Delete(r.Context(), id); err != nil {
+		if err := h.S.Delete(r.Context(), id, userID); err != nil {
 			platform.Error(w, 500, err.Error())
+			log.Println("Big pooopie delete")
 			return
 		}
 	} else {
-		if err := h.S.Archive(r.Context(), id); err != nil {
+		if err := h.S.Archive(r.Context(), id, userID); err != nil {
 			platform.Error(w, 500, err.Error())
 			return
 		}

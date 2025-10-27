@@ -169,13 +169,21 @@ func (s *Store) Update(ctx context.Context, id int64, userid int64, p models.Upd
 	return l, err
 }
 
-func (s *Store) Archive(ctx context.Context, id int64) error {
-	_, err := s.P.Exec(ctx, `UPDATE listings SET status='ARCHIVED' WHERE id=$1`, id)
+func (s *Store) Archive(ctx context.Context, id int64, userid int64) error {
+	var args []any
+	args = append(args, id)
+	args = append(args, userid)
+	_, err := s.P.Exec(ctx, `UPDATE listings SET status='ARCHIVED' WHERE id=$1 and user_id=$2`, args...)
 	return err
 }
 
-func (s *Store) Delete(ctx context.Context, id int64) error {
-	_, err := s.P.Exec(ctx, `DELETE FROM listings WHERE id=$1`, id)
+func (s *Store) Delete(ctx context.Context, id int64, userid int64) error {
+	var args []any
+	args = append(args, id)
+	args = append(args, userid)
+	log.Println("Testing Delete Query: ", FormatQuery(`DELETE FROM listings WHERE id=$1 and user_id=$2`, args))
+	_, err := s.P.Exec(ctx, `DELETE FROM listings WHERE id=$1 and user_id=$2`, args...)
+	log.Println("Finished Delete Query: ", err)
 	return err
 }
 
