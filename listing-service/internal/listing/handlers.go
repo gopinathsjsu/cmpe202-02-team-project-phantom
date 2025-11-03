@@ -189,7 +189,7 @@ func (h *Handlers) ChatSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	listings, err := h.S.List(r.Context(), searchParams)
+	listings, err := h.S.ListWeak(r.Context(), searchParams)
 	if err != nil {
 		log.Printf("ERROR finding listings in database: %v", err)
 		http.Error(w, "Failed to retrieve listings", http.StatusInternalServerError)
