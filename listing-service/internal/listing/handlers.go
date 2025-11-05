@@ -2,21 +2,26 @@ package listing
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	httplib "github.com/kunal768/cmpe202/http-lib"
-	"github.com/your-org/listing-service/internal/gemini"
-	"github.com/your-org/listing-service/internal/models"
-	"github.com/your-org/listing-service/internal/platform"
+	"github.com/kunal768/cmpe202/listing-service/internal/blob"
+	"github.com/kunal768/cmpe202/listing-service/internal/common"
+	"github.com/kunal768/cmpe202/listing-service/internal/gemini"
+	"github.com/kunal768/cmpe202/listing-service/internal/models"
+	"github.com/kunal768/cmpe202/listing-service/internal/platform"
 )
 
 type Handlers struct {
-	AI *gemini.Client
-	S  *Store
+	AI      *gemini.Client
+	S       *Store
+	BlobSvc blob.BlobService
 }
 
 func (h *Handlers) CreateHandler(w http.ResponseWriter, r *http.Request) {
@@ -67,8 +72,8 @@ func (h *Handlers) GetHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) ListHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := models.ListFilters{
-		Limit:  parseInt(q.Get("limit"), 20),
-		Offset: parseInt(q.Get("offset"), 0),
+		Limit:  common.ParseInt(q.Get("limit"), 20),
+		Offset: common.ParseInt(q.Get("offset"), 0),
 		Sort:   q.Get("sort"),
 	}
 	if s := q.Get("keywords"); s != "" {
@@ -83,11 +88,11 @@ func (h *Handlers) ListHandler(w http.ResponseWriter, r *http.Request) {
 		f.Status = &st
 	}
 	if s := q.Get("min_price"); s != "" {
-		v := parseInt64(s, 0)
+		v := common.ParseInt64(s, 0)
 		f.MinPrice = &v
 	}
 	if s := q.Get("max_price"); s != "" {
-		v := parseInt64(s, 0)
+		v := common.ParseInt64(s, 0)
 		f.MaxPrice = &v
 	}
 
@@ -213,23 +218,140 @@ func (h *Handlers) GetUserListsHandler(w http.ResponseWriter, r *http.Request) {
 	platform.JSON(w, http.StatusOK, l)
 }
 
-func parseInt(s string, def int) int {
-	if s == "" {
-		return def
+func (h *Handlers) AddMediaHandler(w http.ResponseWriter, r *http.Request) {
+	// User Auth
+	// Get user ID from context (set by AuthMiddleware)
+	userTokenID, ok := r.Context().Value(httplib.ContextKey("userId")).(string)
+	if !ok {
+		platform.Error(w, http.StatusUnauthorized, "user not authenticated")
+		return
 	}
-	v, err := strconv.Atoi(s)
+
+	// Parse listing ID from URL parameter
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		return def
+		platform.Error(w, http.StatusBadRequest, "invalid listing ID")
+		return
 	}
-	return v
+
+	// Decode JSON body
+	var p models.AddMediaParams
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		platform.Error(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+
+	// Validate array is not empty
+	if len(p.MediaUrls) == 0 {
+		platform.Error(w, http.StatusBadRequest, "media_urls array cannot be empty")
+		return
+	}
+
+	// Call repository method to add media URLs
+	err = h.S.AddMediaUrls(r.Context(), id, userTokenID, p.MediaUrls)
+	if err != nil {
+		// Check error type to return appropriate status code
+		if err.Error() == "listing not found" {
+			platform.Error(w, http.StatusNotFound, "listing not found")
+			return
+		}
+		if err.Error() == "listing does not belong to user" {
+			platform.Error(w, http.StatusForbidden, "listing does not belong to user")
+			return
+		}
+		if err.Error() == "no URLs provided" || err.Error() == "no valid URLs provided" {
+			platform.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		platform.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	platform.JSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Media URLs added successfully",
+		"count":   len(p.MediaUrls),
+	})
 }
-func parseInt64(s string, def int64) int64 {
-	if s == "" {
-		return def
+
+func (h *Handlers) UploadUserMedia(w http.ResponseWriter, r *http.Request) {
+	// We allow 5 files * 20MB each + some overhead for form data
+	ctx := r.Context()
+	userId, ok := r.Context().Value(httplib.ContextKey("userId")).(string)
+	if !ok {
+		platform.Error(w, http.StatusNotFound, "UpdateHandler: user not listed")
+		return
 	}
-	v, err := strconv.ParseInt(s, 10, 64)
+
+	r.Body = http.MaxBytesReader(w, r.Body, (models.MaxFilesToProcess*models.MaxFileUploadSize)+(1<<20)) // Total max size
+
+	// 2. Parse the multipart form data
+	// The number here (20MB) is the max amount of memory to use for storing
+	// the whole request body; excess will be stored in temporary disk files.
+	err := r.ParseMultipartForm(models.MaxFileUploadSize)
 	if err != nil {
-		return def
+		if err.Error() == "http: request body too large" {
+			http.Error(w, "Request body exceeds total size limit.", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, fmt.Sprintf("Error parsing form: %v", err), http.StatusBadRequest)
+		return
 	}
-	return v
+
+	// 3. Get the map of all files uploaded under the name "media"
+	files := r.MultipartForm.File["media"]
+	if len(files) == 0 {
+		http.Error(w, "No files uploaded under the key 'media'", http.StatusBadRequest)
+		return
+	}
+
+	if len(files) > models.MaxFilesToProcess {
+		http.Error(w, fmt.Sprintf("Too many files uploaded. Max allowed: %d.", models.MaxFilesToProcess), http.StatusBadRequest)
+		return
+	}
+
+	var sasResponses []blob.UploadSASResponse
+
+	// 3. Loop through each uploaded file's metadata to generate a secure SAS URL
+	for i, fileHeader := range files {
+		fmt.Printf("Validating file %d: %s (%d bytes)\n", i+1, fileHeader.Filename, fileHeader.Size)
+
+		// a. Check file size and validity based on metadata
+		if fileHeader.Size == 0 || fileHeader.Size > models.MaxFileUploadSize {
+			fmt.Printf("File %s skipped: invalid size.\n", fileHeader.Filename)
+			continue
+		}
+
+		contentType := fileHeader.Header.Get("Content-Type")
+		if !common.IsValidMediaType(contentType) {
+			fmt.Printf("File %s skipped: invalid media type %s.\n", fileHeader.Filename, contentType)
+			continue
+		}
+
+		// b. Determine the unique, final destination name (blobName)
+		safeFileName := strings.ReplaceAll(filepath.Base(fileHeader.Filename), " ", "_")
+		// NOTE: In a real app, include a user/listing ID here for security and organization.
+		uniqueBlobName := fmt.Sprintf("%s-%s", userId, safeFileName)
+
+		// c. Generate the secure SAS URL
+		sasResponse, err := h.BlobSvc.GenerateUploadSAS(ctx, uniqueBlobName)
+		if err != nil {
+			fmt.Printf("Error generating SAS for %s: %v\n", fileHeader.Filename, err)
+			http.Error(w, "Error generating SAS link.", http.StatusInternalServerError)
+			return
+		}
+
+		// d. Collect the generated SAS URL and Permanent URL
+		sasResponses = append(sasResponses, sasResponse)
+	}
+
+	// 4. Send response with the list of SAS URLs
+	if len(sasResponses) > 0 {
+		// Return the list of links for the client to perform parallel uploads
+		platform.JSON(w, http.StatusOK, map[string]interface{}{
+			"message": "SAS URLs generated. Client must now upload files directly.",
+			"uploads": sasResponses,
+		})
+	} else {
+		platform.Error(w, http.StatusBadRequest, "No valid file metadata was processed.")
+	}
 }

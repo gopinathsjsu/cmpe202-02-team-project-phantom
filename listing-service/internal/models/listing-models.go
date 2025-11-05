@@ -8,6 +8,10 @@ import (
 
 type Category string
 type Status string
+type MediaUrl string
+
+const MaxFileUploadSize = 20 << 20 // 20 MB limit per media upload
+const MaxFilesToProcess = 5        // max files user can uplaod at a time
 
 const (
 	CatTextbook     Category = "TEXTBOOK"
@@ -41,14 +45,14 @@ var AllStatuses = []Status{
 }
 
 type Listing struct {
-	ID          int64     `json:"id"`
-	Title       string    `json:"title"`
-	Description *string   `json:"description,omitempty"`
-	Price       int64     `json:"price"`
-	Category    Category  `json:"category"`
-	UserID      uuid.UUID `json:"user_id"`
-	Status      Status    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          int64      `json:"id"`
+	Title       string     `json:"title"`
+	Description *string    `json:"description,omitempty"`
+	Price       int64      `json:"price"`
+	Category    Category   `json:"category"`
+	UserID      uuid.UUID  `json:"user_id"`
+	Status      Status     `json:"status"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 type CreateParams struct {
@@ -66,6 +70,10 @@ type UpdateParams struct {
 	Status      *Status   `json:"status,omitempty"`
 }
 
+type AddMediaParams struct {
+	MediaUrls []string `json:"media_urls"`
+}
+
 type ListFilters struct {
 	Keywords []string  `json:"keywords,omitempty"`
 	Category *Category `json:"category,omitempty"`
@@ -75,4 +83,10 @@ type ListFilters struct {
 	Limit    int
 	Offset   int
 	Sort     string // "created_at_desc", "price_asc", "price_desc"
+}
+
+type FileMetadata struct {
+	FileName string `json:"file_name"`
+	FileSize int64  `json:"file_size"` // Size in bytes
+	// You could also include ContentType here if you trust the client to provide it
 }
