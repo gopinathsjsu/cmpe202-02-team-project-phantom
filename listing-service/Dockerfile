@@ -7,6 +7,7 @@ COPY go.work ./
 COPY http-lib/go.mod http-lib/go.mod
 COPY listing-service/go.mod listing-service/go.mod
 COPY orchestrator/go.mod orchestrator/go.mod 
+
 RUN go work sync && cd listing-service && go mod download
 
 # Copy source code
@@ -15,7 +16,7 @@ COPY listing-service/ listing-service/
 
 # Build from cmd/api
 ENV CGO_ENABLED=0
-RUN mkdir -p /out && go build -o /out/listing-service ./listing-service/cmd/api
+RUN mkdir -p /out && go build -o /out/listing-service ./listing-service/cmd
 
 # ---------- Stage 2: Runtime ----------
 FROM gcr.io/distroless/static-debian12

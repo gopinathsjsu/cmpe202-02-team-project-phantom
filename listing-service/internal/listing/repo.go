@@ -148,6 +148,174 @@ func (s *Store) List(ctx context.Context, f *models.ListFilters) ([]models.Listi
 	return out, rows.Err()
 }
 
+func (s *Store) ListWeak(ctx context.Context, f *models.ListFilters) ([]models.Listing, error) {
+	sb := strings.Builder{}
+	args := []any{}
+	i := 1
+
+	// ------------------------
+	// SELECT with relevance score
+	// ------------------------
+	sb.WriteString(`
+SELECT 
+  l.id, l.title, l.description, l.price, l.category, l.user_id, l.status, l.created_at,
+  (
+`)
+
+	// 1) Keyword score (title weighted higher than description)
+	kwParamIdx := 0
+	if len(f.Keywords) > 0 {
+		kwParamIdx = i
+		args = append(args, f.Keywords) // pgx will map []string -> text[]
+		i++
+
+		sb.WriteString(fmt.Sprintf(`
+    (
+      SELECT COALESCE(SUM(
+        (l.title ILIKE '%%' || kw || '%%')::int * 2 +
+        (l.description ILIKE '%%' || kw || '%%')::int
+      ), 0)
+      FROM unnest($%d::text[]) AS kw
+    )
+`, kwParamIdx))
+	} else {
+		sb.WriteString(`    0`)
+	}
+
+	// 2) Category boost
+	if f.Category != nil {
+		sb.WriteString(fmt.Sprintf(`
+    + CASE WHEN l.category = $%d THEN 3 ELSE 0 END
+`, i))
+		args = append(args, *f.Category)
+		i++
+	}
+
+	// 3) Price window boost
+	switch {
+	case f.MinPrice != nil && f.MaxPrice != nil:
+		sb.WriteString(fmt.Sprintf(`
+    + CASE WHEN l.price BETWEEN $%d AND $%d THEN 2 ELSE 0 END
+`, i, i+1))
+		args = append(args, *f.MinPrice, *f.MaxPrice)
+		i += 2
+	case f.MinPrice != nil:
+		sb.WriteString(fmt.Sprintf(`
+    + CASE WHEN l.price >= $%d THEN 1 ELSE 0 END
+`, i))
+		args = append(args, *f.MinPrice)
+		i++
+	case f.MaxPrice != nil:
+		sb.WriteString(fmt.Sprintf(`
+    + CASE WHEN l.price <= $%d THEN 1 ELSE 0 END
+`, i))
+		args = append(args, *f.MaxPrice)
+		i++
+	}
+
+	sb.WriteString(`
+  ) AS score
+FROM listings l
+`)
+
+	// ------------------------
+	// WHERE (hard constraints + optional "at least one soft signal")
+	// ------------------------
+	var where []string
+
+	// If you want to hide unavailable items by default, keep this hard filter:
+	if f.Status != nil {
+		where = append(where, fmt.Sprintf("l.status = $%d", i))
+		args = append(args, *f.Status)
+		i++
+	}
+
+	// Optional: require *some* soft signal to match to cut noise.
+	// This keeps partial matches but avoids totally irrelevant rows.
+	var softSignals []string
+	if kwParamIdx > 0 {
+		softSignals = append(softSignals, fmt.Sprintf(`
+      EXISTS (
+        SELECT 1 FROM unnest($%d::text[]) kw
+        WHERE l.title ILIKE '%%' || kw || '%%' OR l.description ILIKE '%%' || kw || '%%'
+      )`, kwParamIdx))
+	}
+	if f.Category != nil {
+		softSignals = append(softSignals, fmt.Sprintf("l.category = $%d", i-1 /* category param index */))
+	}
+	if f.MinPrice != nil {
+		// Min price param index depends on which branch we used above; safest is to just add a fresh predicate (not required though).
+		softSignals = append(softSignals, fmt.Sprintf("l.price >= %s", locateParamForValue(args, *f.MinPrice)))
+	}
+	if f.MaxPrice != nil {
+		softSignals = append(softSignals, fmt.Sprintf("l.price <= %s", locateParamForValue(args, *f.MaxPrice)))
+	}
+
+	if len(softSignals) > 0 {
+		where = append(where, "("+strings.Join(softSignals, " OR ")+")")
+	}
+
+	if len(where) > 0 {
+		sb.WriteString("WHERE " + strings.Join(where, " AND ") + "\n")
+	}
+
+	// ------------------------
+	// ORDER BY (relevance first, then tie-breakers)
+	// ------------------------
+	// If the user asked for pure price sort, you can still keep relevance as a tiebreaker.
+	switch f.Sort {
+	case "price_asc":
+		sb.WriteString("ORDER BY score DESC, l.price ASC, l.created_at DESC\n")
+	case "price_desc":
+		sb.WriteString("ORDER BY score DESC, l.price DESC, l.created_at DESC\n")
+	default:
+		sb.WriteString("ORDER BY score DESC, l.created_at DESC\n")
+	}
+
+	// ------------------------
+	// LIMIT/OFFSET
+	// ------------------------
+	if f.Limit <= 0 || f.Limit > 100 {
+		f.Limit = 20
+	}
+	sb.WriteString(fmt.Sprintf("LIMIT %d OFFSET %d", f.Limit, f.Offset))
+
+	rows, err := s.P.Query(ctx, sb.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.Listing
+	for rows.Next() {
+		var l models.Listing
+		var score float64 // extra column
+		if err := rows.Scan(
+			&l.ID, &l.Title, &l.Description, &l.Price,
+			&l.Category, &l.UserID, &l.Status, &l.CreatedAt,
+			&score, // <-- absorb the 9th column
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// locateParamForValue returns the 1-based placeholder like "$3" for the first
+// occurrence of v inside args. It’s a helper so we can reuse previously-added
+// params (e.g., min/max) inside softSignals without duplicating them.
+func locateParamForValue(args []any, v any) string {
+	for idx, a := range args {
+		// pgx will coerce numeric types; basic reflect equality is fine for how we build args.
+		if fmt.Sprint(a) == fmt.Sprint(v) {
+			return fmt.Sprintf("$%d", idx+1)
+		}
+	}
+	// Fallback (shouldn’t happen if we build in-order). You could panic or return a constant false predicate.
+	return "NULL"
+}
+
 func (s *Store) Update(ctx context.Context, id int64, userID string, p models.UpdateParams) (models.Listing, error) {
 	// Build dynamic SET clause with positional parameters
 	var sets []string
