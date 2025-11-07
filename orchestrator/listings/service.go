@@ -82,8 +82,8 @@ func (s *svc) extractUserAndRole(ctx context.Context) (userID string, roleID str
 
 	roleIDVal := ctx.Value(httplib.ContextKey("userRole"))
 	if roleIDVal != nil {
-		if roleInt, ok := roleIDVal.(int); ok {
-			roleID = strconv.Itoa(roleInt)
+		if roleStr, ok := roleIDVal.(string); ok {
+			roleID = roleStr
 		}
 	}
 	if roleID == "" {
