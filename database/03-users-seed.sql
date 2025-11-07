@@ -7,7 +7,7 @@ new_users AS (
   SELECT
     'user_' || gs                  AS user_name,
     'user' || gs || '@sjsu.edu'    AS email,
-    CASE WHEN gs % 10 = 0 THEN 1 ELSE 0 END AS role,
+    CASE WHEN gs % 10 = 0 THEN '0' ELSE '1' END AS role,
     jsonb_build_object(
       'Email', 'user' || gs || '@sjsu.edu',
       'Phone', '+1-555-' || to_char(1000+gs, 'FM0000')

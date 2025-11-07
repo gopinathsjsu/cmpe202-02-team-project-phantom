@@ -9,7 +9,7 @@ type AzureBlobCredentials struct {
 }
 
 type UploadSASResponse struct {
-	SASURL             string
-	PermanentPublicURL string
-	BlobName           string
+	SASURL             string `json:"sas_url"`
+	PermanentPublicURL string `json:"permanent_public_url"`
+	BlobName           string `json:"blob_name"`
 }

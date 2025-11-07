@@ -105,7 +105,7 @@ func (e *Endpoints) GetUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// User role may or may not be present; do not error if missing
-	userRole, _ := r.Context().Value(httplib.ContextKey("userRole")).(int)
+	userRole, _ := r.Context().Value(httplib.ContextKey("userRole")).(string)
 
 	// Call service
 	user, err := e.service.GetUserByID(r.Context(), userID)

@@ -96,9 +96,38 @@ func (s *svc) Signup(ctx context.Context, req SignupRequest) (*SignupResponse, e
 		return nil, fmt.Errorf("failed to create user authentication: %w", err)
 	}
 
+	// Generate access token
+	accessToken, err := httplib.GenerateJWT(userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token: %w", err)
+	}
+
+	// Generate refresh token
+	refreshToken, err := httplib.GenerateRefreshToken(userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+
+	// Create user login authentication
+	userLoginAuth := &models.UserLoginAuth{
+		UserId:       userID,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresAt:    now.Add(24 * time.Hour), // Token expires in 24 hours
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	// Create login auth record
+	if err := s.repo.CreateUserLoginAuth(ctx, userLoginAuth); err != nil {
+		return nil, fmt.Errorf("failed to create user login authentication: %w", err)
+	}
+
 	return &SignupResponse{
-		Message: "User created successfully",
-		User:    *user,
+		Message:      "User created successfully",
+		Token:        accessToken,
+		RefreshToken: refreshToken,
+		User:         *user,
 	}, nil
 }
 
