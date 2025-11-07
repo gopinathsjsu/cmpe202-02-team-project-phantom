@@ -3,7 +3,6 @@ package listings
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 
@@ -286,58 +285,16 @@ func (e *Endpoints) GetUserListingsHandler(w http.ResponseWriter, r *http.Reques
 
 // UploadMediaHandler handles uploading media files (requires authentication)
 func (e *Endpoints) UploadMediaHandler(w http.ResponseWriter, r *http.Request) {
-	// Parse multipart form
-	err := r.ParseMultipartForm(10 << 20) // 10 MB max
-	if err != nil {
-		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "Invalid request",
-			Message: "Failed to parse multipart form",
-		})
-		return
-	}
-
-	files := r.MultipartForm.File["media"]
-	if len(files) == 0 {
-		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
-			Error:   "Validation error",
-			Message: "At least one media file is required",
-		})
-		return
-	}
-
-	var fileDataList []FileData
-	for _, fileHeader := range files {
-		file, err := fileHeader.Open()
-		if err != nil {
-			httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "Failed to read file",
-				Message: err.Error(),
-			})
-			return
+	// Get optional listing ID from query parameter
+	var listingID *int64
+	if listingIDStr := r.URL.Query().Get("listing_id"); listingIDStr != "" {
+		if id, err := strconv.ParseInt(listingIDStr, 10, 64); err == nil {
+			listingID = &id
 		}
-
-		data, err := io.ReadAll(file)
-		file.Close()
-		if err != nil {
-			httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
-				Error:   "Failed to read file data",
-				Message: err.Error(),
-			})
-			return
-		}
-
-		fileDataList = append(fileDataList, FileData{
-			FileName:    fileHeader.Filename,
-			FileSize:    fileHeader.Size,
-			ContentType: fileHeader.Header.Get("Content-Type"),
-			Data:        data,
-		})
 	}
 
-	req := UploadMediaRequest{Files: fileDataList}
-
-	// Call service
-	response, err := e.service.UploadMedia(r.Context(), req)
+	// Call service - forward the request body directly
+	response, err := e.service.UploadMedia(r.Context(), r, listingID)
 	if err != nil {
 		httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "Failed to upload media",
@@ -409,7 +366,7 @@ func (e *Endpoints) AddMediaURLHandler(w http.ResponseWriter, r *http.Request) {
 	httplib.WriteJSON(w, http.StatusOK, response)
 }
 
-// ChatSearchHandler handles AI-powered search (public endpoint)
+// ChatSearchHandler handles AI-powered search
 func (e *Endpoints) ChatSearchHandler(w http.ResponseWriter, r *http.Request) {
 	var req ChatSearchRequest
 
@@ -455,12 +412,10 @@ func (e *Endpoints) RegisterRoutes(mux *http.ServeMux, dbPool *pgxpool.Pool) {
 		)
 	}
 
-	// Public routes
-	mux.Handle("GET /api/listings/", http.HandlerFunc(e.GetAllListingsHandler))
-	mux.Handle("GET /api/listings/{id}", http.HandlerFunc(e.GetListingByIDHandler))
-	mux.Handle("POST /api/listings/chatsearch", httplib.JSONRequestDecoder(http.HandlerFunc(e.ChatSearchHandler)))
-
 	// Protected routes (require auth + role injection)
+	mux.Handle("GET /api/listings/", protected(http.HandlerFunc(e.GetAllListingsHandler)))
+	mux.Handle("GET /api/listings/{id}", protected(http.HandlerFunc(e.GetListingByIDHandler)))
+	mux.Handle("POST /api/listings/chatsearch", protected(http.HandlerFunc(e.ChatSearchHandler)))
 	mux.Handle("POST /api/listings/create", protected(http.HandlerFunc(e.CreateListingHandler)))
 	mux.Handle("PATCH /api/listings/update/{id}", protected(http.HandlerFunc(e.UpdateListingHandler)))
 	mux.Handle("DELETE /api/listings/delete/{id}", httplib.AuthMiddleWare(

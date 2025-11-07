@@ -109,19 +109,6 @@ type DeleteListingResponse struct {
 	Status string `json:"status"`
 }
 
-// UploadMediaRequest for uploading media files
-type UploadMediaRequest struct {
-	Files []FileData `json:"files"`
-}
-
-// FileData represents file information and data for upload
-type FileData struct {
-	FileName    string `json:"file_name"`
-	FileSize    int64  `json:"file_size"`
-	ContentType string `json:"content_type,omitempty"`
-	Data        []byte `json:"data"` // File content as bytes
-}
-
 // UploadSASResponse represents a SAS URL response from blob service
 type UploadSASResponse struct {
 	SASURL             string `json:"sas_url"`

@@ -89,7 +89,9 @@
           "name": "Get All Listings",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
             "url": {
               "raw": "{{base_url}}/api/listings/?limit=20&offset=0",
               "host": ["{{base_url}}"],
@@ -112,7 +114,9 @@
           "name": "Get Listing by ID",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
             "url": {
               "raw": "{{base_url}}/api/listings/{{listing_id}}",
               "host": ["{{base_url}}"],
@@ -202,9 +206,12 @@
               { "key": "Authorization", "value": "Bearer {{access_token}}" }
             ],
             "url": {
-              "raw": "{{base_url}}/api/listings/upload",
+              "raw": "{{base_url}}/api/listings/upload?listing_id={{listing_id}}",
               "host": ["{{base_url}}"],
-              "path": ["api", "listings", "upload"]
+              "path": ["api", "listings", "upload"],
+              "query": [
+                { "key": "listing_id", "value": "{{listing_id}}", "disabled": true, "description": "Optional: If provided, permanent URLs will be automatically saved to this listing" }
+              ]
             },
             "body": {
               "mode": "formdata",
@@ -212,11 +219,40 @@
                 {
                   "key": "media",
                   "type": "file",
-                  "src": []
+                  "src": [],
+                  "description": "Upload one or more files. The response will contain SAS URLs for direct upload to Azure Blob Storage."
                 }
               ]
             },
-            "description": "Upload file metadata to generate SAS URLs for direct blob storage upload"
+            "description": "Upload file metadata to generate SAS URLs for direct blob storage upload. If listing_id is provided, permanent URLs will be automatically saved to that listing."
+          },
+          "response": []
+        },
+        {
+          "name": "Upload File to SAS URL",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "x-ms-blob-type", "value": "BlockBlob", "description": "Required for Azure Blob Storage" },
+              { "key": "Content-Type", "value": "{{file_content_type}}", "description": "Set to the appropriate content type (e.g., image/jpeg, image/png)" }
+            ],
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": ""
+              },
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{sas_url}}",
+              "host": ["{{sas_url}}"],
+              "description": "Use the sas_url from the Upload Media response. Example: https://markeplace.blob.core.windows.net/listingmedia/filename.jpg?se=...&sig=..."
+            },
+            "description": "Upload the actual file to Azure Blob Storage using the SAS URL from the Upload Media response. This is a direct PUT request to Azure, not to the orchestrator.\n\nCURL Example:\ncurl -X PUT \"{{sas_url}}\" \\\n  -H \"x-ms-blob-type: BlockBlob\" \\\n  -H \"Content-Type: image/jpeg\" \\\n  --data-binary @/path/to/your/file.jpg"
           },
           "response": []
         },
@@ -245,6 +281,7 @@
           "request": {
             "method": "POST",
             "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
             "url": {
@@ -267,7 +304,9 @@
     { "key": "base_url", "value": "http://localhost:8080" },
     { "key": "access_token", "value": "" },
     { "key": "refresh_token", "value": "" },
-    { "key": "listing_id", "value": "" }
+    { "key": "listing_id", "value": "" },
+    { "key": "sas_url", "value": "", "description": "SAS URL from Upload Media response" },
+    { "key": "file_content_type", "value": "image/jpeg", "description": "Content type of the file being uploaded (e.g., image/jpeg, image/png, image/gif)" }
   ]
 }
 

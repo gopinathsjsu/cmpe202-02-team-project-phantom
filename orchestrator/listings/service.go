@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -33,7 +32,7 @@ type Service interface {
 	UpdateListing(ctx context.Context, req UpdateListingRequest) (*UpdateListingResponse, error)
 	/* user can delete only their own listing, admin can delete all listings */
 	DeleteListing(ctx context.Context, req DeleteListingRequest) (*DeleteListingResponse, error)
-	UploadMedia(ctx context.Context, req UploadMediaRequest) (*UploadMediaResponse, error)
+	UploadMedia(ctx context.Context, r *http.Request, listingID *int64) (*UploadMediaResponse, error)
 	AddMediaURL(ctx context.Context, req AddMediaURLRequest) (*AddMediaURLResponse, error)
 	ChatSearch(ctx context.Context, req ChatSearchRequest) (*ChatSearchResponse, error)
 }
@@ -353,41 +352,20 @@ func (s *svc) DeleteListing(ctx context.Context, req DeleteListingRequest) (*Del
 	return &DeleteListingResponse{Status: result.Status}, nil
 }
 
-func (s *svc) UploadMedia(ctx context.Context, req UploadMediaRequest) (*UploadMediaResponse, error) {
+func (s *svc) UploadMedia(ctx context.Context, r *http.Request, listingID *int64) (*UploadMediaResponse, error) {
 	userID, roleID, err := s.extractUserAndRole(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var requestBody bytes.Buffer
-	writer := multipart.NewWriter(&requestBody)
-
-	for _, file := range req.Files {
-		part, err := writer.CreateFormFile("media", file.FileName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create form file: %w", err)
-		}
-
-		// Write the actual file data
-		if len(file.Data) > 0 {
-			_, err = part.Write(file.Data)
-			if err != nil {
-				return nil, fmt.Errorf("failed to write file data: %w", err)
-			}
-		}
-	}
-
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
-	}
-
 	fullURL := s.config.URL + "/listings/upload"
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", fullURL, &requestBody)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", fullURL, r.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+	// Forward Content-Type header from original request
+	httpReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
 	httpReq.Header.Set("X-User-ID", userID)
 	httpReq.Header.Set("X-Role-ID", roleID)
 
@@ -408,6 +386,31 @@ func (s *svc) UploadMedia(ctx context.Context, req UploadMediaRequest) (*UploadM
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// If listing ID is provided, automatically persist permanent URLs to database
+	if listingID != nil && len(result.Uploads) > 0 {
+		// Extract permanent URLs from uploads
+		permanentURLs := make([]string, 0, len(result.Uploads))
+		for _, upload := range result.Uploads {
+			if upload.PermanentPublicURL != "" {
+				permanentURLs = append(permanentURLs, upload.PermanentPublicURL)
+			}
+		}
+
+		// Persist URLs to database if we have any
+		if len(permanentURLs) > 0 {
+			addMediaReq := AddMediaURLRequest{
+				ID:        *listingID,
+				MediaUrls: permanentURLs,
+			}
+			_, err := s.AddMediaURL(ctx, addMediaReq)
+			if err != nil {
+				// Log error but don't fail the upload response
+				// The SAS URLs are still valid, just the persistence failed
+				fmt.Printf("Warning: Failed to persist media URLs to listing %d: %v\n", *listingID, err)
+			}
+		}
 	}
 
 	return &UploadMediaResponse{
