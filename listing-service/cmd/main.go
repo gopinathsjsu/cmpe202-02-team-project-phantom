@@ -47,7 +47,8 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger) // <-- built-in logger
 
-	r.Mount("/listings", listing.Routes(handlers))
+	orchestratorRequestID := os.Getenv("ORCH_REQUEST_ID")
+	r.Mount("/listings", listing.Routes(handlers, orchestratorRequestID))
 
 	log.Println("listening on", getenv("LISTING_PORT", "8080"))
 

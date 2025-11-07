@@ -108,14 +108,23 @@ func RoleInjectionMiddleWare(dbPool *pgxpool.Pool) func(next http.Handler) http.
 }
 
 // EnforceXRequestID checks for the presence of the ""X-Request-ID" header.
-func EnforceXRequestID(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Request-ID") == "" {
-			http.Error(w, "Missing required header: X-Forward-From", http.StatusBadRequest)
-			return // Short-circuit
-		}
-		next.ServeHTTP(w, r)
-	})
+const HeaderRequestID = "X-Request-ID"
+
+func EnforceXRequestID(defaultID string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+			// 1. Check for an existing ID (from client or upstream service)
+			requestID := r.Header.Get(HeaderRequestID)
+
+			// 2. If missing, inject the default value provided by the microservice
+			if requestID == "" {
+				r.Header.Set(HeaderRequestID, defaultID)
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // EnforceXUserID checks for the presence of the "X-User-ID" header.
