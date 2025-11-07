@@ -87,7 +87,7 @@ func ValidateUserAndRoleAuth(w http.ResponseWriter, r *http.Request) (string, er
 		platform.Error(w, http.StatusUnauthorized, "user not authenticated")
 		return "", errors.New("user not authenticated")
 	}
-	userRole := r.Header.Get("X-User-Role")
+	userRole := r.Header.Get("X-Role-ID")
 
 	if userRole == string(httplib.ADMIN) || userRole == string(httplib.USER) {
 		log.Println("user is a valid type")
@@ -98,4 +98,24 @@ func ValidateUserAndRoleAuth(w http.ResponseWriter, r *http.Request) (string, er
 		return "", errors.New(errorMsg)
 	}
 	return userID, nil
+}
+
+// ValidateUserAndRoleAuthWithRole validates user and role, returns both userID and role
+func ValidateUserAndRoleAuthWithRole(w http.ResponseWriter, r *http.Request) (string, string, error) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		platform.Error(w, http.StatusUnauthorized, "user not authenticated")
+		return "", "", errors.New("user not authenticated")
+	}
+	userRole := r.Header.Get("X-Role-ID")
+
+	if userRole == string(httplib.ADMIN) || userRole == string(httplib.USER) {
+		log.Println("user is a valid type")
+	} else {
+		errorMsg := fmt.Sprintf("Invalid or missing user role: %s", userRole)
+		log.Println(errorMsg)
+		platform.Error(w, http.StatusUnauthorized, errorMsg)
+		return "", "", errors.New(errorMsg)
+	}
+	return userID, userRole, nil
 }

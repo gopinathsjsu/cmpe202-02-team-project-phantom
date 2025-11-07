@@ -117,21 +117,21 @@ func (h *Handlers) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) DeleteHandler(w http.ResponseWriter, r *http.Request) {
-	// User Auth
-	userID, err := common.ValidateUserAndRoleAuth(w, r)
+	// User Auth - get both userID and role
+	userID, userRole, err := common.ValidateUserAndRoleAuthWithRole(w, r)
 	if err != nil {
 		return
 	}
 
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if r.URL.Query().Get("hard") == "true" {
-		if err := h.S.Delete(r.Context(), id, userID); err != nil {
+		if err := h.S.Delete(r.Context(), id, userID, userRole); err != nil {
 			platform.Error(w, 500, err.Error())
 			log.Println("Big pooopie delete")
 			return
 		}
 	} else {
-		if err := h.S.Archive(r.Context(), id, userID); err != nil {
+		if err := h.S.Archive(r.Context(), id, userID, userRole); err != nil {
 			platform.Error(w, 500, err.Error())
 			return
 		}
