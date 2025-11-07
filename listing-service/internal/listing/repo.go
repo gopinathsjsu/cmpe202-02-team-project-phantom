@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	httplib "github.com/kunal768/cmpe202/http-lib"
 	"github.com/kunal768/cmpe202/listing-service/internal/common"
 	"github.com/kunal768/cmpe202/listing-service/internal/models"
 )
@@ -372,20 +373,38 @@ func (s *Store) Update(ctx context.Context, id int64, userID string, p models.Up
 	return l, err
 }
 
-func (s *Store) Archive(ctx context.Context, id int64, userid string) error {
+func (s *Store) Archive(ctx context.Context, id int64, userid string, userRole string) error {
 	var args []any
 	args = append(args, id)
-	args = append(args, userid)
-	_, err := s.P.Exec(ctx, `UPDATE listings SET status='ARCHIVED' WHERE id=$1 and user_id=$2`, args...)
+	
+	// Admin can archive any listing, regular user can only archive their own
+	var query string
+	if userRole == string(httplib.ADMIN) {
+		query = `UPDATE listings SET status='ARCHIVED' WHERE id=$1`
+	} else {
+		query = `UPDATE listings SET status='ARCHIVED' WHERE id=$1 AND user_id=$2`
+		args = append(args, userid)
+	}
+	
+	_, err := s.P.Exec(ctx, query, args...)
 	return err
 }
 
-func (s *Store) Delete(ctx context.Context, id int64, userid string) error {
+func (s *Store) Delete(ctx context.Context, id int64, userid string, userRole string) error {
 	var args []any
 	args = append(args, id)
-	args = append(args, userid)
-	log.Println("Testing Delete Query: ", common.FormatQuery(`DELETE FROM listings WHERE id=$1 and user_id=$2`, args))
-	_, err := s.P.Exec(ctx, `DELETE FROM listings WHERE id=$1 and user_id=$2`, args...)
+	
+	// Admin can delete any listing, regular user can only delete their own
+	var query string
+	if userRole == string(httplib.ADMIN) {
+		query = `DELETE FROM listings WHERE id=$1`
+	} else {
+		query = `DELETE FROM listings WHERE id=$1 AND user_id=$2`
+		args = append(args, userid)
+	}
+	
+	log.Println("Testing Delete Query: ", common.FormatQuery(query, args))
+	_, err := s.P.Exec(ctx, query, args...)
 	log.Println("Finished Delete Query: ", err)
 	return err
 }
