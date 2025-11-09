@@ -17,6 +17,9 @@ import (
 type MessageRepository interface {
 	SaveMessage(ctx context.Context, msg *models.ChatMessage) error
 	UpdateMessageStatus(ctx context.Context, messageID string, status models.MessageStatus) error
+	GetMessageByID(ctx context.Context, messageID string) (*models.ChatMessage, error)
+	GetUndeliveredCount(ctx context.Context, recipientID string) (int, error)
+	GetConversationsWithUndeliveredCount(ctx context.Context, recipientID string) (int, error)
 	Close() error
 }
 
@@ -131,6 +134,49 @@ func (r *MongoMessageRepository) UpdateMessageStatus(ctx context.Context, messag
 
 	log.Printf("Updated message %s status to %s", messageID, status)
 	return nil
+}
+
+// GetMessageByID retrieves a message by its messageID
+func (r *MongoMessageRepository) GetMessageByID(ctx context.Context, messageID string) (*models.ChatMessage, error) {
+	filter := bson.M{"messageId": messageID}
+	var msg models.ChatMessage
+	err := r.collection.FindOne(ctx, filter).Decode(&msg)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil // Message not found, return nil
+		}
+		return nil, fmt.Errorf("failed to get message: %w", err)
+	}
+	return &msg, nil
+}
+
+// GetUndeliveredCount returns the count of undelivered messages for a recipient
+func (r *MongoMessageRepository) GetUndeliveredCount(ctx context.Context, recipientID string) (int, error) {
+	filter := bson.M{
+		"recipientId": recipientID,
+		"status":      models.StatusUndelivered,
+	}
+	count, err := r.collection.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count undelivered messages: %w", err)
+	}
+	return int(count), nil
+}
+
+// GetConversationsWithUndeliveredCount returns the count of distinct conversations (users) with undelivered messages
+func (r *MongoMessageRepository) GetConversationsWithUndeliveredCount(ctx context.Context, recipientID string) (int, error) {
+	filter := bson.M{
+		"recipientId": recipientID,
+		"status":      models.StatusUndelivered,
+	}
+
+	// Use distinct to get unique sender IDs
+	senderIDs, err := r.collection.Distinct(ctx, "senderId", filter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get distinct senders: %w", err)
+	}
+
+	return len(senderIDs), nil
 }
 
 // Close closes the MongoDB connection

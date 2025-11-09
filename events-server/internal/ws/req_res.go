@@ -29,6 +29,21 @@ type ChatMessage struct {
 	Msg         string `json:"msg"`         // message content
 }
 
+// AuthAckMessage is sent by server to acknowledge authentication
+type AuthAckMessage struct {
+	Type    string `json:"type"`    // "auth_ack"
+	Status  string `json:"status"`  // "success" or "failed"
+	UserID  string `json:"userId,omitempty"` // only present on success
+	Error   string `json:"error,omitempty"`  // only present on failure
+}
+
+// NotificationMessage is sent by server to notify clients of events
+type NotificationMessage struct {
+	Type    string `json:"type"`    // "notification"
+	SubType string `json:"subType"` // "inbox"
+	Count   int    `json:"count"`   // number of undelivered messages
+}
+
 func ParseMessage(b []byte) (string, any, error) {
 	var env Message
 	if err := json.Unmarshal(b, &env); err != nil {

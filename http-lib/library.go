@@ -156,6 +156,54 @@ func JSONRequestDecoder(next http.Handler) http.Handler {
 	})
 }
 
+// CORSMiddleware handles CORS headers for cross-origin requests
+func CORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Get allowed origins from environment or use default
+		allowedOrigins := os.Getenv("CORS_ALLOWED_ORIGINS")
+		if allowedOrigins == "" {
+			allowedOrigins = "http://localhost:3000,http://localhost:3001"
+		}
+
+		origin := r.Header.Get("Origin")
+
+		// Check if origin is allowed
+		allowed := false
+		if origin != "" {
+			origins := strings.Split(allowedOrigins, ",")
+			for _, o := range origins {
+				if strings.TrimSpace(o) == origin {
+					allowed = true
+					break
+				}
+			}
+		}
+
+		// Always set CORS headers for allowed origins
+		if allowed && origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		} else if origin != "" {
+			// For debugging: allow localhost origins even if not in list
+			if strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "https://localhost:") {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+		}
+
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Max-Age", "3600")
+
+		// Handle preflight requests - MUST return before calling next handler
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func WriteJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

@@ -35,12 +35,17 @@ func getenvInt(key string) int {
 	return i
 }
 
+// getenvOptional returns the environment variable value, allowing empty strings
+func getenvOptional(key string) string {
+	return os.Getenv(key)
+}
+
 func Load() Config {
 	return Config{
 		RabbitMQURL:       getenv("RABBITMQ_URL"),
 		RabbitMQQueueName: getenv("RABBITMQ_QUEUE_NAME"),
 		RedisAddr:         getenv("REDIS_ADDR"),
-		RedisPassword:     getenv("REDIS_PASSWORD"),
+		RedisPassword:     getenvOptional("REDIS_PASSWORD"), // Optional: empty password is valid for Redis
 		RedisDB:           getenvInt("REDIS_DB"),
 		MongoURI:          getenv("MONGO_URI"),
 	}

@@ -13,7 +13,7 @@ import (
 
 // MessageSubscriber handles Redis pub/sub for message delivery
 type MessageSubscriber interface {
-	Subscribe(ctx context.Context, userID string, messageHandler func([]byte) error) error
+	Subscribe(ctx context.Context, userID string, messageHandler func([]byte) error, onConfirmed func()) error
 	Unsubscribe(ctx context.Context, userID string) error
 	Close() error
 }
@@ -41,7 +41,8 @@ func NewRedisMessageSubscriber(addr, password string, db int) *RedisMessageSubsc
 }
 
 // Subscribe starts listening to messages for a specific user
-func (r *RedisMessageSubscriber) Subscribe(ctx context.Context, userID string, messageHandler func([]byte) error) error {
+// onConfirmed callback is called when subscription is confirmed (after pubsub.Receive succeeds)
+func (r *RedisMessageSubscriber) Subscribe(ctx context.Context, userID string, messageHandler func([]byte) error, onConfirmed func()) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -49,9 +50,15 @@ func (r *RedisMessageSubscriber) Subscribe(ctx context.Context, userID string, m
 		return fmt.Errorf("subscriber is closed")
 	}
 
-	// Check if already subscribed
-	if _, exists := r.subs[userID]; exists {
-		return fmt.Errorf("already subscribed to user %s", userID)
+	// Check if already subscribed - if so, unsubscribe the old one first
+	if oldPubsub, exists := r.subs[userID]; exists {
+		log.Printf("[Subscriber] User %s already has active subscription, closing old subscription before creating new one", userID)
+		if err := oldPubsub.Close(); err != nil {
+			log.Printf("[Subscriber] Error closing old subscription for user %s: %v", userID, err)
+		}
+		delete(r.subs, userID)
+		// Give a brief moment for the old goroutine to exit
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	channel := fmt.Sprintf("user:%s:messages", userID)
@@ -59,9 +66,9 @@ func (r *RedisMessageSubscriber) Subscribe(ctx context.Context, userID string, m
 	r.subs[userID] = pubsub
 
 	// Start goroutine to handle messages
-	go r.handleMessages(ctx, userID, pubsub, messageHandler)
+	go r.handleMessages(ctx, userID, pubsub, messageHandler, onConfirmed)
 
-	log.Printf("Subscribed to messages for user %s on channel %s", userID, channel)
+	log.Printf("Subscribing to messages for user %s on channel %s (waiting for confirmation...)", userID, channel)
 	return nil
 }
 
@@ -118,7 +125,7 @@ func (r *RedisMessageSubscriber) Close() error {
 }
 
 // handleMessages processes incoming messages from Redis pub/sub
-func (r *RedisMessageSubscriber) handleMessages(ctx context.Context, userID string, pubsub *redis.PubSub, messageHandler func([]byte) error) {
+func (r *RedisMessageSubscriber) handleMessages(ctx context.Context, userID string, pubsub *redis.PubSub, messageHandler func([]byte) error, onConfirmed func()) {
 	defer func() {
 		if err := pubsub.Close(); err != nil {
 			log.Printf("Error closing pubsub for user %s: %v", userID, err)
@@ -126,14 +133,27 @@ func (r *RedisMessageSubscriber) handleMessages(ctx context.Context, userID stri
 	}()
 
 	// Wait for subscription confirmation
+	confirmStart := time.Now()
+	log.Printf("[TIMING] [%s] Waiting for Redis subscription confirmation at %v", userID, confirmStart)
 	_, err := pubsub.Receive(ctx)
 	if err != nil {
-		log.Printf("Failed to receive subscription confirmation for user %s: %v", userID, err)
+		log.Printf("[TIMING] [%s] Failed to receive subscription confirmation for user %s: %v (took %v)", userID, userID, err, time.Since(confirmStart))
 		return
 	}
 
+	// Subscription confirmed - call the callback
+	confirmDuration := time.Since(confirmStart)
+	log.Printf("[TIMING] [%s] Subscription confirmed for user %s on channel user:%s:messages at %v (took %v)", userID, userID, userID, time.Now(), confirmDuration)
+	if onConfirmed != nil {
+		onConfirmed()
+	}
+
 	// Channel to receive messages
+	chStart := time.Now()
+	log.Printf("[TIMING] [%s] Getting pubsub.Channel() at %v", userID, chStart)
 	ch := pubsub.Channel()
+	chDuration := time.Since(chStart)
+	log.Printf("[TIMING] [%s] pubsub.Channel() ready at %v (took %v), now listening for messages", userID, time.Now(), chDuration)
 
 	for {
 		select {
@@ -143,13 +163,16 @@ func (r *RedisMessageSubscriber) handleMessages(ctx context.Context, userID stri
 			return
 		case msg, ok := <-ch:
 			if !ok {
-				log.Printf("Message channel closed for user %s", userID)
+				log.Printf("[TIMING] [%s] Message channel closed for user %s at %v", userID, userID, time.Now())
 				return
 			}
 
 			if msg == nil {
 				continue
 			}
+
+			receiveTime := time.Now()
+			log.Printf("[TIMING] [%s] Received message from Redis channel at %v", userID, receiveTime)
 
 			// Parse the message payload
 			var messageData struct {
@@ -161,14 +184,21 @@ func (r *RedisMessageSubscriber) handleMessages(ctx context.Context, userID stri
 				Type        string    `json:"type"`
 			}
 
+			parseStart := time.Now()
 			if err := json.Unmarshal([]byte(msg.Payload), &messageData); err != nil {
-				log.Printf("Failed to unmarshal message for user %s: %v", userID, err)
+				log.Printf("[TIMING] [%s] Failed to unmarshal message for user %s: %v (took %v)", userID, userID, err, time.Since(parseStart))
 				continue
 			}
+			parseDuration := time.Since(parseStart)
+			log.Printf("[TIMING] [%s] Parsed message %s for user %s (took %v)", userID, messageData.MessageID, userID, parseDuration)
 
 			// Call the message handler
+			handlerStart := time.Now()
 			if err := messageHandler([]byte(msg.Payload)); err != nil {
-				log.Printf("Error handling message for user %s: %v", userID, err)
+				log.Printf("[TIMING] [%s] Error handling message %s for user %s: %v (took %v)", userID, messageData.MessageID, userID, err, time.Since(handlerStart))
+			} else {
+				handlerDuration := time.Since(handlerStart)
+				log.Printf("[TIMING] [%s] Successfully handled message %s for user %s (took %v, total time from receive: %v)", userID, messageData.MessageID, userID, handlerDuration, time.Since(receiveTime))
 			}
 		}
 	}
