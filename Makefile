@@ -17,3 +17,6 @@ log-ls:
 
 log-db:
 	docker compose logs -f db
+
+log-fr:
+	docker compose logs -f frontend
