@@ -1,7 +1,9 @@
 go 1.23.0
 
 use (
-  ./http-lib
-  ./listing-service
-  ./orchestrator
+	./chat-consumer
+	./events-server
+	./http-lib
+	./listing-service
+	./orchestrator
 )

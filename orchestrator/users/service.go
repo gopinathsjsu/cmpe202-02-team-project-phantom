@@ -11,6 +11,7 @@ import (
 	"github.com/kunal768/cmpe202/orchestrator/internal/queue"
 	"github.com/kunal768/cmpe202/orchestrator/models"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -275,28 +276,72 @@ func (s *svc) FetchUndeliveredMessages(ctx context.Context, recipientID string) 
 	}
 	defer cur.Close(ctx)
 	var results []map[string]interface{}
+	now := time.Now()
+	// Skip messages that were updated within the last 2 seconds to prevent race conditions
+	// This gives chat-consumer time to update status from UNDELIVERED to DELIVERED
+	recentThreshold := now.Add(-2 * time.Second)
 	for cur.Next(ctx) {
 		var doc map[string]interface{}
 		if err := cur.Decode(&doc); err != nil {
+			continue
+		}
+		// Check if message was recently updated (might be in process of being delivered)
+		// updatedAt can be stored as primitive.DateTime or time.Time depending on MongoDB driver version
+		var updatedTime time.Time
+		if updatedAt, ok := doc["updatedAt"].(primitive.DateTime); ok {
+			updatedTime = updatedAt.Time()
+		} else if updatedAt, ok := doc["updatedAt"].(time.Time); ok {
+			updatedTime = updatedAt
+		} else {
+			// If we can't determine updatedAt, include the message (better to republish than skip)
+			results = append(results, doc)
+			continue
+		}
+		
+		if updatedTime.After(recentThreshold) {
+			// Skip recently updated messages to prevent republishing messages that are being processed
+			fmt.Printf("[TIMING] [Orchestrator] Skipping message %v - updated %v ago (likely being processed by chat-consumer)\n", doc["messageId"], time.Since(updatedTime))
 			continue
 		}
 		results = append(results, doc)
 	}
 
 	// Best-effort: republish undelivered messages to the queue if publisher is configured
+	// Normalize message format to match what chat-consumer expects (not the full MongoDB document)
 	if s.publisher != nil && len(results) > 0 {
-		for _, m := range results {
-			b, err := json.Marshal(m)
+		republishStart := time.Now()
+		fmt.Printf("[TIMING] [Orchestrator] Starting republish of %d undelivered messages for recipient %s at %v\n", len(results), recipientID, republishStart)
+		for i, m := range results {
+			// Extract only the fields that chat-consumer expects
+			// Remove MongoDB-specific fields like _id, status, createdAt, updatedAt
+			messageForQueue := map[string]interface{}{
+				"messageId":   m["messageId"],
+				"senderId":    m["senderId"],
+				"recipientId": m["recipientId"],
+				"content":     m["content"],
+				"timestamp":   m["timestamp"],
+				"type":        m["type"],
+			}
+			
+			msgStart := time.Now()
+			b, err := json.Marshal(messageForQueue)
 			if err != nil {
 				// skip malformed document
+				fmt.Printf("[TIMING] [Orchestrator] failed to marshal undelivered message %v for recipient %s: %v (took %v)\n", m["messageId"], recipientID, err, time.Since(msgStart))
 				continue
 			}
 			// publish with context but do not fail the whole operation if publish fails
+			publishStart := time.Now()
 			if err := s.publisher.Publish(ctx, b); err != nil {
 				// Log publish failure using fmt for minimal dependencies
-				fmt.Printf("failed to publish undelivered message for recipient %s: %v\n", recipientID, err)
+				fmt.Printf("[TIMING] [Orchestrator] failed to publish undelivered message %v for recipient %s: %v (took %v)\n", m["messageId"], recipientID, err, time.Since(publishStart))
+			} else {
+				publishDuration := time.Since(publishStart)
+				fmt.Printf("[TIMING] [Orchestrator] Republished undelivered message %v to queue for recipient %s (message %d/%d, took %v)\n", m["messageId"], recipientID, i+1, len(results), publishDuration)
 			}
 		}
+		republishDuration := time.Since(republishStart)
+		fmt.Printf("[TIMING] [Orchestrator] Completed republish of %d messages for recipient %s (total time: %v)\n", len(results), recipientID, republishDuration)
 	}
 
 	return results, nil

@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gobwas/ws"
 	"github.com/joho/godotenv"
+	httplib "github.com/kunal768/cmpe202/http-lib"
 	"github.com/kunal768/cmpe202/events-server/internal/auth"
 	"github.com/kunal768/cmpe202/events-server/internal/config"
 	"github.com/kunal768/cmpe202/events-server/internal/delivery"
@@ -31,21 +34,82 @@ func readConnection(hub *wsx.Hub, pres presence.PresenceStore, authc auth.AuthCl
 	}
 
 	mux := http.NewServeMux()
+	
+	// WebSocket endpoint
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers for WebSocket upgrade (Safari requires this)
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			// Allow localhost origins for development
+			if strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "https://localhost:") {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+		}
+		
 		// Upgrade the incoming HTTP connection to a WebSocket connection.
 		// ws.UpgradeHTTP returns (net.Conn, http.Header, *http.Request, error) in common examples.
 		conn, _, _, err := ws.UpgradeHTTP(r, w)
 		if err != nil {
-			log.Println("ws upgrade error:", err)
+			log.Printf("ws upgrade error from %s: %v", r.RemoteAddr, err)
 			return
 		}
+		log.Printf("WebSocket upgrade successful from %s", r.RemoteAddr)
 		// handle each websocket connection concurrently
 		go handleConn(conn, hub, pres, authc, msgService, cfg)
 	})
 
+	// HTTP API endpoint for sending messages to WebSocket clients
+	mux.HandleFunc("POST /api/send-message", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			UserID  string          `json:"userId"`
+			Message json.RawMessage `json:"message"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httplib.WriteJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "Invalid request body",
+				"message": "Failed to decode request body",
+			})
+			return
+		}
+
+		if req.UserID == "" {
+			httplib.WriteJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "Validation error",
+				"message": "userId is required",
+			})
+			return
+		}
+
+		if len(req.Message) == 0 {
+			httplib.WriteJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "Validation error",
+				"message": "message is required",
+			})
+			return
+		}
+
+		// Send message to user via WebSocket
+		if err := hub.SendMessageToUser(req.UserID, req.Message); err != nil {
+			log.Printf("Failed to send message to user %s: %v", req.UserID, err)
+			httplib.WriteJSON(w, http.StatusNotFound, map[string]string{
+				"error":   "User not connected",
+				"message": err.Error(),
+			})
+			return
+		}
+
+		httplib.WriteJSON(w, http.StatusOK, map[string]string{
+			"message": "Message sent successfully",
+		})
+	})
+
+	// Wrap mux with CORS middleware
+	handler := httplib.CORSMiddleware(mux)
+
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}

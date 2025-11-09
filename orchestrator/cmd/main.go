@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
+	httplib "github.com/kunal768/cmpe202/http-lib"
 	dbclient "github.com/kunal768/cmpe202/orchestrator/clients/db"
 	mongoclient "github.com/kunal768/cmpe202/orchestrator/clients/mongo"
 	"github.com/kunal768/cmpe202/orchestrator/internal/queue"
@@ -91,6 +92,9 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
+	// Wrap the mux with CORS middleware
+	handler := httplib.CORSMiddleware(mux)
+
 	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -98,5 +102,5 @@ func main() {
 	}
 
 	fmt.Printf("Server starting on port %s\n", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	log.Fatal(http.ListenAndServe(":"+port, handler))
 }

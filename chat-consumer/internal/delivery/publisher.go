@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
 // MessagePublisher defines the interface for publishing messages
 type MessagePublisher interface {
-	PublishToUser(ctx context.Context, userID string, message []byte) error
+	PublishToUser(ctx context.Context, userID string, message []byte) (int64, error)
 	Close() error
 }
 
@@ -31,23 +32,27 @@ func NewRedisMessagePublisher(addr, password string, db int) *RedisMessagePublis
 }
 
 // PublishToUser publishes a message to a specific user's channel
-func (r *RedisMessagePublisher) PublishToUser(ctx context.Context, userID string, message []byte) error {
+// Returns the number of subscribers that received the message
+func (r *RedisMessagePublisher) PublishToUser(ctx context.Context, userID string, message []byte) (int64, error) {
 	channel := fmt.Sprintf("user:%s:messages", userID)
 
 	result := r.client.Publish(ctx, channel, message)
 	if result.Err() != nil {
-		return fmt.Errorf("failed to publish message to user %s: %w", userID, result.Err())
+		return 0, fmt.Errorf("failed to publish message to user %s: %w", userID, result.Err())
 	}
 
 	subscribers := result.Val()
-	log.Printf("Published message to user %s on channel %s (subscribers: %d)", userID, channel, subscribers)
+	publishTime := time.Now()
+	log.Printf("[TIMING] [Publisher] Published message to user %s on channel %s at %v (subscribers: %d)", userID, channel, publishTime, subscribers)
 
-	// If no subscribers, the user is not online
+	// If no subscribers, the user is not online or events-server is not subscribed
 	if subscribers == 0 {
-		log.Printf("No subscribers for user %s - user may be offline", userID)
+		log.Printf("[TIMING] [Publisher] WARNING: No subscribers for user %s - events-server may not be subscribed for this userId at %v", userID, publishTime)
+	} else {
+		log.Printf("[TIMING] [Publisher] Success: %d subscriber(s) received message for user %s at %v", subscribers, userID, publishTime)
 	}
 
-	return nil
+	return subscribers, nil
 }
 
 // Close closes the Redis client

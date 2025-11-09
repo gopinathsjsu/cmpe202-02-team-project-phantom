@@ -18,14 +18,16 @@ import (
 
 // MessageConsumer handles consuming messages from RabbitMQ
 type MessageConsumer struct {
-	conn             *amqp.Connection
-	channel          *amqp.Channel
-	queueName        string
-	messageRepo      storage.MessageRepository
-	presenceChecker  presence.PresenceChecker
-	messagePublisher delivery.MessagePublisher
-	mu               sync.RWMutex
-	closed           bool
+	conn                *amqp.Connection
+	channel             *amqp.Channel
+	queueName           string
+	messageRepo         storage.MessageRepository
+	presenceChecker     presence.PresenceChecker
+	messagePublisher    delivery.MessagePublisher
+	mu                  sync.RWMutex
+	closed              bool
+	notificationSent    map[string]time.Time // Track when we last sent notification for a user
+	notificationSentMu  sync.RWMutex         // Mutex for notificationSent map
 }
 
 // NewMessageConsumer creates a new message consumer
@@ -76,6 +78,7 @@ func NewMessageConsumer(
 		messageRepo:      messageRepo,
 		presenceChecker:  presenceChecker,
 		messagePublisher: messagePublisher,
+		notificationSent: make(map[string]time.Time), // Initialize map to prevent nil map panic
 	}, nil
 }
 
@@ -140,7 +143,25 @@ func (c *MessageConsumer) processMessage(ctx context.Context, delivery amqp.Deli
 		return
 	}
 
-	// Create ChatMessage with SENT status
+	// Check if message already exists in database (might be a republished undelivered message)
+	existingMsg, err := c.messageRepo.GetMessageByID(msgCtx, incomingMsg.MessageID)
+	if err != nil {
+		log.Printf("Failed to check for existing message %s: %v", incomingMsg.MessageID, err)
+	}
+
+	// Determine initial status: if message exists and is UNDELIVERED, keep it as UNDELIVERED
+	// Otherwise, set to SENT (new message)
+	initialStatus := models.StatusSent
+	wasUndelivered := false
+	if existingMsg != nil {
+		if existingMsg.Status == models.StatusUndelivered {
+			initialStatus = models.StatusUndelivered
+			wasUndelivered = true
+			log.Printf("Message %s is a republished undelivered message", incomingMsg.MessageID)
+		}
+	}
+
+	// Create ChatMessage with appropriate status
 	chatMsg := &models.ChatMessage{
 		MessageID:   incomingMsg.MessageID,
 		SenderID:    incomingMsg.SenderID,
@@ -148,70 +169,125 @@ func (c *MessageConsumer) processMessage(ctx context.Context, delivery amqp.Deli
 		Content:     incomingMsg.Content,
 		Timestamp:   incomingMsg.Timestamp,
 		Type:        incomingMsg.Type,
-		Status:      models.StatusSent,
+		Status:      initialStatus,
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
 
-	// Save message to MongoDB with SENT status
+	// If message exists, preserve its CreatedAt
+	if existingMsg != nil {
+		chatMsg.CreatedAt = existingMsg.CreatedAt
+	}
+
+	// Save message to MongoDB with appropriate status
 	if err := c.messageRepo.SaveMessage(msgCtx, chatMsg); err != nil {
 		log.Printf("Failed to save message to database: %v", err)
 		c.nackMessage(delivery)
 		return
 	}
 
-	log.Printf("Message %s saved with SENT status", chatMsg.MessageID)
+	log.Printf("[TIMING] [Consumer] Message %s saved with %s status at %v", chatMsg.MessageID, chatMsg.Status, time.Now())
 
 	// Check if recipient is online
+	presenceCheckStart := time.Now()
+	log.Printf("[TIMING] [Consumer] Checking presence for user %s (message %s) at %v", chatMsg.RecipientID, chatMsg.MessageID, presenceCheckStart)
 	isOnline, err := c.presenceChecker.IsOnline(msgCtx, chatMsg.RecipientID)
+	presenceCheckDuration := time.Since(presenceCheckStart)
 	if err != nil {
-		log.Printf("Failed to check presence for user %s: %v", chatMsg.RecipientID, err)
+		log.Printf("[TIMING] [Consumer] Failed to check presence for user %s: %v (took %v)", chatMsg.RecipientID, err, presenceCheckDuration)
 		// Mark as undelivered if we can't check presence
 		chatMsg.UpdateStatus(models.StatusUndelivered)
-		if err := c.messageRepo.SaveMessage(msgCtx, chatMsg); err != nil {
-			log.Printf("Failed to update message status to UNDELIVERED: %v", err)
+		if saveErr := c.messageRepo.SaveMessage(msgCtx, chatMsg); saveErr != nil {
+			log.Printf("[TIMING] [Consumer] ERROR: Failed to save UNDELIVERED status after presence check error for message %s: %v - message will be redelivered", chatMsg.MessageID, saveErr)
+			c.nackMessage(delivery) // Don't ack if save fails
+			return
 		}
 		c.ackMessage(delivery)
 		return
 	}
 
+	log.Printf("[TIMING] [Consumer] Presence check result for user %s (message %s): isOnline=%v (took %v)", chatMsg.RecipientID, chatMsg.MessageID, isOnline, presenceCheckDuration)
+
 	if isOnline {
+
 		// User is online, try to deliver via Redis pub/sub
+		marshalStart := time.Now()
 		messageBytes, err := json.Marshal(incomingMsg)
 		if err != nil {
-			log.Printf("Failed to marshal message for delivery: %v", err)
+			log.Printf("[TIMING] [Consumer] Failed to marshal message %s for delivery: %v (took %v)", chatMsg.MessageID, err, time.Since(marshalStart))
 			chatMsg.UpdateStatus(models.StatusUndelivered)
-			if err := c.messageRepo.SaveMessage(msgCtx, chatMsg); err != nil {
-				log.Printf("Failed to update message status to UNDELIVERED: %v", err)
+			if saveErr := c.messageRepo.SaveMessage(msgCtx, chatMsg); saveErr != nil {
+				log.Printf("[TIMING] [Consumer] ERROR: Failed to save UNDELIVERED status after marshal error for message %s: %v - message will be redelivered", chatMsg.MessageID, saveErr)
+				c.nackMessage(delivery) // Don't ack if save fails
+				return
 			}
 			c.ackMessage(delivery)
 			return
 		}
+		marshalDuration := time.Since(marshalStart)
+		log.Printf("[TIMING] [Consumer] Marshaled message %s for user %s (took %v)", chatMsg.MessageID, chatMsg.RecipientID, marshalDuration)
 
-		// Publish to Redis channel
-		if err := c.messagePublisher.PublishToUser(msgCtx, chatMsg.RecipientID, messageBytes); err != nil {
-			log.Printf("Failed to publish message to user %s: %v", chatMsg.RecipientID, err)
+		// Publish to Redis channel and get subscriber count
+		publishStart := time.Now()
+		log.Printf("[TIMING] [Consumer] Publishing message %s to Redis channel for user %s at %v", chatMsg.MessageID, chatMsg.RecipientID, publishStart)
+		subscribers, err := c.messagePublisher.PublishToUser(msgCtx, chatMsg.RecipientID, messageBytes)
+		publishDuration := time.Since(publishStart)
+		if err != nil {
+			log.Printf("[TIMING] [Consumer] Failed to publish message %s to user %s: %v (took %v)", chatMsg.MessageID, chatMsg.RecipientID, err, publishDuration)
 			chatMsg.UpdateStatus(models.StatusUndelivered)
-		} else {
-			// Message published successfully
+			// Save status and ack even if publish failed (message will be retried if needed)
+			if saveErr := c.messageRepo.SaveMessage(msgCtx, chatMsg); saveErr != nil {
+				log.Printf("[TIMING] [Consumer] ERROR: Failed to save UNDELIVERED status for message %s: %v - message will be redelivered", chatMsg.MessageID, saveErr)
+				c.nackMessage(delivery) // Don't ack if save fails
+				return
+			}
+			c.ackMessage(delivery)
+			return
+		} else if subscribers > 0 {
+			// Message published successfully and there was at least one subscriber
+			// This means events-server is subscribed for this userId
 			chatMsg.UpdateStatus(models.StatusDelivered)
-			log.Printf("Message %s delivered to user %s", chatMsg.MessageID, chatMsg.RecipientID)
-		}
+			log.Printf("[TIMING] [Consumer] Message %s delivered to user %s (subscribers: %d, publish took %v)", chatMsg.MessageID, chatMsg.RecipientID, subscribers, publishDuration)
 
-		// Update status in database
-		if err := c.messageRepo.SaveMessage(msgCtx, chatMsg); err != nil {
-			log.Printf("Failed to update message status: %v", err)
+			// CRITICAL: Save status to DB BEFORE acking message
+			// If save fails, do NOT ack - message will be redelivered and status will be updated correctly
+			if saveErr := c.messageRepo.SaveMessage(msgCtx, chatMsg); saveErr != nil {
+				log.Printf("[TIMING] [Consumer] ERROR: Failed to save DELIVERED status for message %s: %v - NOT acking message, will retry", chatMsg.MessageID, saveErr)
+				c.nackMessage(delivery) // Don't ack if save fails - prevents loop
+				return
+			}
+			log.Printf("[TIMING] [Consumer] Successfully saved DELIVERED status for message %s to database", chatMsg.MessageID)
+
+			// If this was a previously undelivered message, send notification (only once per user per minute)
+			if wasUndelivered {
+				c.sendUndeliveredNotification(msgCtx, chatMsg.RecipientID)
+			}
+		} else {
+			// No subscribers, mark as undelivered
+			chatMsg.UpdateStatus(models.StatusUndelivered)
+			log.Printf("[TIMING] [Consumer] Message %s published to user %s but NO SUBSCRIBERS (events-server not subscribed for this userId), marked as UNDELIVERED (publish took %v)", chatMsg.MessageID, chatMsg.RecipientID, publishDuration)
+			// Save status and ack (no subscribers is not a retryable error)
+			if saveErr := c.messageRepo.SaveMessage(msgCtx, chatMsg); saveErr != nil {
+				log.Printf("[TIMING] [Consumer] ERROR: Failed to save UNDELIVERED status for message %s: %v - message will be redelivered", chatMsg.MessageID, saveErr)
+				c.nackMessage(delivery) // Don't ack if save fails
+				return
+			}
 		}
 	} else {
 		// User is offline, mark as undelivered
 		chatMsg.UpdateStatus(models.StatusUndelivered)
-		if err := c.messageRepo.SaveMessage(msgCtx, chatMsg); err != nil {
-			log.Printf("Failed to update message status to UNDELIVERED: %v", err)
-		}
 		log.Printf("User %s is offline, message %s marked as UNDELIVERED", chatMsg.RecipientID, chatMsg.MessageID)
+		// Save status before acking
+		if saveErr := c.messageRepo.SaveMessage(msgCtx, chatMsg); saveErr != nil {
+			log.Printf("[TIMING] [Consumer] ERROR: Failed to save UNDELIVERED status for offline user message %s: %v - message will be redelivered", chatMsg.MessageID, saveErr)
+			c.nackMessage(delivery) // Don't ack if save fails
+			return
+		}
+		c.ackMessage(delivery)
+		return
 	}
 
-	// Acknowledge the message
+	// If we reach here, status was saved successfully, ack the message
 	c.ackMessage(delivery)
 }
 
@@ -227,6 +303,58 @@ func (c *MessageConsumer) nackMessage(delivery amqp.Delivery) {
 	if err := delivery.Nack(false, true); err != nil {
 		log.Printf("Failed to nack message: %v", err)
 	}
+}
+
+// sendUndeliveredNotification sends a notification to the user about undelivered messages
+func (c *MessageConsumer) sendUndeliveredNotification(ctx context.Context, recipientID string) {
+	// Check if we've sent a notification for this user recently (within last minute)
+	c.notificationSentMu.RLock()
+	lastSent, exists := c.notificationSent[recipientID]
+	c.notificationSentMu.RUnlock()
+
+	if exists && time.Since(lastSent) < time.Minute {
+		// Already sent notification recently, skip
+		return
+	}
+
+	// Count remaining undelivered messages
+	count, err := c.messageRepo.GetUndeliveredCount(ctx, recipientID)
+	if err != nil {
+		log.Printf("Failed to count undelivered messages for user %s: %v", recipientID, err)
+		return
+	}
+
+	if count == 0 {
+		// No undelivered messages remaining, no need to notify
+		return
+	}
+
+	// Create notification message
+	notification := map[string]interface{}{
+		"type":        "notification",
+		"subType":     "inbox",
+		"count":       count,
+		"recipientId": recipientID,
+	}
+
+	notificationBytes, err := json.Marshal(notification)
+	if err != nil {
+		log.Printf("Failed to marshal notification: %v", err)
+		return
+	}
+
+	// Publish notification to Redis channel (ignore subscriber count for notifications)
+	if _, err := c.messagePublisher.PublishToUser(ctx, recipientID, notificationBytes); err != nil {
+		log.Printf("Failed to publish notification to user %s: %v", recipientID, err)
+		return
+	}
+
+	// Mark that we've sent notification for this user
+	c.notificationSentMu.Lock()
+	c.notificationSent[recipientID] = time.Now()
+	c.notificationSentMu.Unlock()
+
+	log.Printf("Notification sent to user %s: %d undelivered messages", recipientID, count)
 }
 
 // Close closes the consumer and connections

@@ -11,6 +11,7 @@ import (
 
 type AuthClient interface {
 	Verify(ctx context.Context, userID string, bearerToken string) error
+	GetBaseURL() string
 }
 
 type HTTPClient interface {
@@ -48,4 +49,8 @@ func (c OrchestratorClient) Verify(ctx context.Context, userID string, bearerTok
 		return fmt.Errorf("auth verify failed: status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (c OrchestratorClient) GetBaseURL() string {
+	return c.BaseURL
 }
