@@ -4,13 +4,31 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Search, Plus, MessageSquare, User, Settings, LogOut, Menu } from "lucide-react"
 import { useState, useEffect } from "react"
+import { useAuth } from "@/hooks/use-auth"
+import { useUnreadCount } from "@/hooks/use-unread-count"
 
 export function Navigation() {
   const router = useRouter()
+  const { user, token } = useAuth()
+  const [refreshToken, setRefreshToken] = useState<string | null>(null)
+  
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setRefreshToken(localStorage.getItem('frontend-refreshToken'))
+    }
+  }, [])
+  
+  const { unreadConversationCount } = useUnreadCount(
+    user?.user_id || null,
+    token,
+    refreshToken,
+    false // No polling in navigation
+  )
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isScrolled, setIsScrolled] = useState(false)
 
@@ -83,9 +101,14 @@ export function Navigation() {
                 Sell Item
               </Link>
             </Button>
-            <Button asChild variant="outline" size="icon" className="h-11 w-11 magnetic-button">
+            <Button asChild variant="outline" size="icon" className="h-11 w-11 magnetic-button relative">
               <Link href="/messages">
                 <MessageSquare className="h-5 w-5" />
+                {unreadConversationCount > 0 && (
+                  <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs bg-primary text-primary-foreground">
+                    {unreadConversationCount > 9 ? "9+" : unreadConversationCount}
+                  </Badge>
+                )}
               </Link>
             </Button>
             <DropdownMenu>
@@ -148,10 +171,15 @@ export function Navigation() {
                   Sell Item
                 </Link>
               </Button>
-              <Button asChild variant="ghost" className="justify-start">
-                <Link href="/messages">
+              <Button asChild variant="ghost" className="justify-start relative">
+                <Link href="/messages" className="flex items-center">
                   <MessageSquare className="mr-2 h-4 w-4" />
                   Messages
+                  {unreadConversationCount > 0 && (
+                    <Badge className="ml-2 h-5 w-5 flex items-center justify-center p-0 text-xs bg-primary text-primary-foreground">
+                      {unreadConversationCount > 9 ? "9+" : unreadConversationCount}
+                    </Badge>
+                  )}
                 </Link>
               </Button>
               <Button asChild variant="ghost" className="justify-start">

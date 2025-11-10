@@ -6,10 +6,11 @@ import type {
   RefreshTokenRequest,
   RefreshTokenResponse,
   ErrorResponse,
-} from './types'
-import { isTokenExpired } from '@/lib/utils/jwt'
+  User,
+} from "./types"
+import { isTokenExpired } from "@/lib/utils/jwt"
 
-const ORCHESTRATOR_URL = process.env.NEXT_PUBLIC_ORCHESTRATOR_URL || 'http://localhost:8080'
+const ORCHESTRATOR_URL = process.env.NEXT_PUBLIC_ORCHESTRATOR_URL || "http://localhost:8080"
 
 // Token refresh state management
 let refreshPromise: Promise<string | null> | null = null
@@ -21,7 +22,7 @@ let refreshCallbacks: Array<{ resolve: (token: string | null) => void; reject: (
  */
 async function refreshAccessToken(
   refreshToken: string,
-  onTokenUpdate?: (newToken: string, newRefreshToken: string) => void
+  onTokenUpdate?: (newToken: string, newRefreshToken: string) => void,
 ): Promise<string | null> {
   // If refresh is already in progress, queue this request
   if (refreshPromise) {
@@ -34,23 +35,23 @@ async function refreshAccessToken(
   refreshPromise = (async () => {
     try {
       const response = await fetch(`${ORCHESTRATOR_URL}/api/users/refresh`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({ refresh_token: refreshToken }),
       })
 
       if (!response.ok) {
         const error: ErrorResponse = await response.json().catch(() => ({
-          error: 'Unknown error',
+          error: "Unknown error",
           message: `HTTP ${response.status}: ${response.statusText}`,
         }))
-        throw new Error(error.message || error.error || 'Token refresh failed')
+        throw new Error(error.message || error.error || "Token refresh failed")
       }
 
       const data: RefreshTokenResponse = await response.json()
-      
+
       // Update tokens in callback (for useAuth hook to update localStorage)
       if (onTokenUpdate) {
         onTokenUpdate(data.access_token, data.refresh_token)
@@ -58,14 +59,14 @@ async function refreshAccessToken(
 
       // Resolve all queued requests
       const token = data.access_token
-      refreshCallbacks.forEach(cb => cb.resolve(token))
+      refreshCallbacks.forEach((cb) => cb.resolve(token))
       refreshCallbacks = []
 
       return token
     } catch (error) {
       // Reject all queued requests
-      const err = error instanceof Error ? error : new Error('Token refresh failed')
-      refreshCallbacks.forEach(cb => cb.reject(err))
+      const err = error instanceof Error ? error : new Error("Token refresh failed")
+      refreshCallbacks.forEach((cb) => cb.reject(err))
       refreshCallbacks = []
       throw err
     } finally {
@@ -83,7 +84,7 @@ async function handleResponse<T>(
   response: Response,
   refreshToken: string | null,
   onTokenUpdate?: (newToken: string, newRefreshToken: string) => void,
-  retryRequest?: () => Promise<Response>
+  retryRequest?: () => Promise<Response>,
 ): Promise<T> {
   if (!response.ok) {
     // If 401 and we have a refresh token, try to refresh
@@ -99,15 +100,15 @@ async function handleResponse<T>(
         }
       } catch (refreshError) {
         // Refresh failed, throw original error
-        console.error('[API] Token refresh failed:', refreshError)
+        console.error("[API] Token refresh failed:", refreshError)
       }
     }
 
     const error: ErrorResponse = await response.json().catch(() => ({
-      error: 'Unknown error',
+      error: "Unknown error",
       message: `HTTP ${response.status}: ${response.statusText}`,
     }))
-    throw new Error(error.message || error.error || 'Request failed')
+    throw new Error(error.message || error.error || "Request failed")
   }
   return response.json()
 }
@@ -127,11 +128,11 @@ export function setTokenUpdateCallback(callback: (newToken: string, newRefreshTo
  * Checks expiration and refreshes if needed
  */
 async function getValidToken(refreshToken: string | null): Promise<string | null> {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return null
   }
 
-  const token = localStorage.getItem('frontend-loginToken')
+  const token = localStorage.getItem("frontend-loginToken")
   if (!token) {
     return null
   }
@@ -143,7 +144,7 @@ async function getValidToken(refreshToken: string | null): Promise<string | null
         const newToken = await refreshAccessToken(refreshToken, tokenUpdateCallback || undefined)
         return newToken
       } catch (error) {
-        console.error('[API] Failed to refresh expired token:', error)
+        console.error("[API] Failed to refresh expired token:", error)
         return null
       }
     }
@@ -156,9 +157,9 @@ async function getValidToken(refreshToken: string | null): Promise<string | null
 export const orchestratorApi = {
   async signup(data: SignupRequest): Promise<SignupResponse> {
     const response = await fetch(`${ORCHESTRATOR_URL}/api/users/signup`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(data),
     })
@@ -167,9 +168,9 @@ export const orchestratorApi = {
 
   async login(data: LoginRequest): Promise<LoginResponse> {
     const response = await fetch(`${ORCHESTRATOR_URL}/api/users/login`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(data),
     })
@@ -178,13 +179,130 @@ export const orchestratorApi = {
 
   async refreshToken(data: RefreshTokenRequest): Promise<RefreshTokenResponse> {
     const response = await fetch(`${ORCHESTRATOR_URL}/api/users/refresh`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(data),
     })
     return handleResponse<RefreshTokenResponse>(response, null)
   },
-}
 
+  async getConversations(token: string, refreshToken: string | null): Promise<{ conversations: any[]; total: number }> {
+    const validToken = (await getValidToken(refreshToken)) || token
+
+    const makeRequest = () =>
+      fetch(`${ORCHESTRATOR_URL}/api/chat/conversations`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          "Content-Type": "application/json",
+        },
+      })
+
+    const response = await makeRequest()
+
+    return handleResponse<{ conversations: any[]; total: number }>(
+      response,
+      refreshToken,
+      tokenUpdateCallback || undefined,
+      async () => {
+        const newToken = await getValidToken(refreshToken)
+        return fetch(`${ORCHESTRATOR_URL}/api/chat/conversations`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${newToken || validToken}`,
+            "Content-Type": "application/json",
+          },
+        })
+      },
+    )
+  },
+
+  async getMessages(
+    token: string,
+    refreshToken: string | null,
+    otherUserId: string,
+  ): Promise<{ messages: any[]; count: number }> {
+    const validToken = (await getValidToken(refreshToken)) || token
+
+    const makeRequest = () =>
+      fetch(`${ORCHESTRATOR_URL}/api/chat/messages/${otherUserId}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          "Content-Type": "application/json",
+        },
+      })
+
+    const response = await makeRequest()
+
+    return handleResponse<{ messages: any[]; count: number }>(
+      response,
+      refreshToken,
+      tokenUpdateCallback || undefined,
+      async () => {
+        const newToken = await getValidToken(refreshToken)
+        return fetch(`${ORCHESTRATOR_URL}/api/chat/messages/${otherUserId}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${newToken || validToken}`,
+            "Content-Type": "application/json",
+          },
+        })
+      },
+    )
+  },
+
+  async getConversationsWithUndeliveredCount(token: string, refreshToken: string | null): Promise<{ count: number }> {
+    const validToken = (await getValidToken(refreshToken)) || token
+
+    const makeRequest = () =>
+      fetch(`${ORCHESTRATOR_URL}/api/chat/conversations-with-undelivered-count`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          "Content-Type": "application/json",
+        },
+      })
+
+    const response = await makeRequest()
+
+    return handleResponse<{ count: number }>(response, refreshToken, tokenUpdateCallback || undefined, async () => {
+      const newToken = await getValidToken(refreshToken)
+      return fetch(`${ORCHESTRATOR_URL}/api/chat/conversations-with-undelivered-count`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${newToken || validToken}`,
+          "Content-Type": "application/json",
+        },
+      })
+    })
+  },
+
+  async searchUsers(token: string, refreshToken: string | null, query: string): Promise<{ users: User[] }> {
+    const validToken = (await getValidToken(refreshToken)) || token
+
+    const makeRequest = () =>
+      fetch(`${ORCHESTRATOR_URL}/api/users/search?q=${encodeURIComponent(query)}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          "Content-Type": "application/json",
+        },
+      })
+
+    const response = await makeRequest()
+
+    return handleResponse<{ users: User[] }>(response, refreshToken, tokenUpdateCallback || undefined, async () => {
+      const newToken = await getValidToken(refreshToken)
+      return fetch(`${ORCHESTRATOR_URL}/api/users/search?q=${encodeURIComponent(query)}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${newToken || validToken}`,
+          "Content-Type": "application/json",
+        },
+      })
+    })
+  },
+}
