@@ -135,7 +135,7 @@ export function useAuth() {
     }
   }, [])
 
-  const refreshToken = useCallback(async (): Promise<string | null> => {
+  const getRefreshedToken = useCallback(async (): Promise<string | null> => {
     if (refreshInProgressRef.current) {
       // Wait for ongoing refresh
       return new Promise((resolve) => {
@@ -201,7 +201,7 @@ export function useAuth() {
     login,
     signup,
     logout,
-    refreshToken,
+    getRefreshedToken,
     isTokenExpired: isTokenExpiredHelper,
   }
 }

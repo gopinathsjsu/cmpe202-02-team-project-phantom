@@ -2,73 +2,333 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { Send, Search, MoreVertical } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { Send, Search, MoreVertical, Plus, Loader2 } from "lucide-react"
+import { useAuth } from "@/hooks/use-auth"
+import { useWebSocketConnection } from "@/hooks/use-websocket-connection"
+import { useUnreadCount } from "@/hooks/use-unread-count"
+import { orchestratorApi } from "@/lib/api/orchestrator"
+import { getCurrentUserId } from "@/lib/utils/jwt"
+import type { User } from "@/lib/api/types"
 
-const conversations = [
-  {
-    id: 1,
-    name: "Alice Johnson",
-    avatar: "/placeholder.svg?height=40&width=40",
-    lastMessage: "Is the textbook still available?",
-    time: "2m ago",
-    unread: 2,
-    online: true,
-  },
-  {
-    id: 2,
-    name: "Bob Smith",
-    avatar: "/placeholder.svg?height=40&width=40",
-    lastMessage: "Thanks for the quick response!",
-    time: "1h ago",
-    unread: 0,
-    online: false,
-  },
-  {
-    id: 3,
-    name: "Carol Davis",
-    avatar: "/placeholder.svg?height=40&width=40",
-    lastMessage: "Can we meet tomorrow?",
-    time: "3h ago",
-    unread: 1,
-    online: true,
-  },
-]
+interface Conversation {
+  otherUserId: string
+  otherUserName?: string
+  lastMessage: string
+  lastTimestamp: string
+  unreadCount: number
+  isLastFromMe: boolean
+}
 
-const messages = [
-  {
-    id: 1,
-    sender: "Alice Johnson",
-    content: "Hi! Is the Calculus textbook still available?",
-    time: "10:30 AM",
-    isOwn: false,
-  },
-  { id: 2, sender: "You", content: "Yes, it's still available! Are you interested?", time: "10:32 AM", isOwn: true },
-  { id: 3, sender: "Alice Johnson", content: "Great! Can I see it today?", time: "10:33 AM", isOwn: false },
-  {
-    id: 4,
-    sender: "You",
-    content: "I'm free after 3 PM. Where would you like to meet?",
-    time: "10:35 AM",
-    isOwn: true,
-  },
-]
+interface ChatMessage {
+  messageId: string
+  senderId: string
+  recipientId: string
+  content: string
+  timestamp: string
+  type: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
 
 export default function MessagesPage() {
-  const [selectedConversation, setSelectedConversation] = useState(conversations[0])
-  const [messageInput, setMessageInput] = useState("")
+  const router = useRouter()
+  const { user, token, refreshToken, isAuthenticated, isHydrated } = useAuth()
+  const {
+    sendMessage: sendWebSocketMessage,
+    messages: wsMessages,
+    connectionState,
+  } = useWebSocketConnection(user?.user_id || null, token, refreshToken)
+  const { markConversationAsSeen } = useUnreadCount(
+    user?.user_id || null,
+    token,
+    refreshToken,
+    false, // No polling on messages page
+  )
 
-  const handleSend = (e: React.FormEvent) => {
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
+  const [messages, setMessages] = useState<Record<string, ChatMessage[]>>({})
+  const [messageInput, setMessageInput] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [showNewChatDialog, setShowNewChatDialog] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searchResults, setSearchResults] = useState<User[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (isHydrated && !isAuthenticated) {
+      router.push("/")
+    }
+  }, [isAuthenticated, isHydrated, router])
+
+  useEffect(() => {
+    if (!isAuthenticated || !token) return
+
+    const fetchConversations = async () => {
+      try {
+        setLoading(true)
+        const response = await orchestratorApi.getConversations(token, refreshToken)
+        setConversations(response.conversations)
+        if (response.conversations.length > 0 && !selectedConversation) {
+          setSelectedConversation(response.conversations[0])
+        }
+      } catch (error) {
+        console.error("Failed to fetch conversations:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchConversations()
+  }, [isAuthenticated, token, refreshToken])
+
+  useEffect(() => {
+    if (!isAuthenticated || !token || !selectedConversation) return
+
+    const fetchMessages = async () => {
+      if (messages[selectedConversation.otherUserId]) {
+        return
+      }
+
+      try {
+        const response = await orchestratorApi.getMessages(token, refreshToken, selectedConversation.otherUserId)
+        setMessages((prev) => ({
+          ...prev,
+          [selectedConversation.otherUserId]: response.messages,
+        }))
+        markConversationAsSeen(selectedConversation.otherUserId)
+      } catch (error) {
+        console.error("Failed to fetch messages:", error)
+      }
+    }
+
+    fetchMessages()
+  }, [selectedConversation, messages, isAuthenticated, token, refreshToken, markConversationAsSeen])
+
+  useEffect(() => {
+    if (!user?.user_id) return
+
+    wsMessages.forEach((wsMessage) => {
+      if (wsMessage.direction === "received" && wsMessage.senderId !== user.user_id) {
+        const otherUserId = wsMessage.senderId
+        const chatMessage: ChatMessage = {
+          messageId: wsMessage.messageId,
+          senderId: wsMessage.senderId,
+          recipientId: wsMessage.recipientId,
+          content: wsMessage.content,
+          timestamp: wsMessage.timestamp.toISOString(),
+          type: wsMessage.type,
+          status: "delivered",
+          createdAt: wsMessage.timestamp.toISOString(),
+          updatedAt: wsMessage.timestamp.toISOString(),
+        }
+
+        setMessages((prev) => {
+          const existingMessages = prev[otherUserId] || []
+          if (existingMessages.some((m) => m.messageId === chatMessage.messageId)) {
+            return prev
+          }
+          return {
+            ...prev,
+            [otherUserId]: [...existingMessages, chatMessage],
+          }
+        })
+
+        setConversations((prev) => {
+          const existing = prev.find((c) => c.otherUserId === otherUserId)
+          if (existing) {
+            return prev.map((c) =>
+              c.otherUserId === otherUserId
+                ? {
+                    ...c,
+                    lastMessage: chatMessage.content,
+                    lastTimestamp: chatMessage.timestamp,
+                    unreadCount: c.unreadCount + 1,
+                    isLastFromMe: false,
+                  }
+                : c,
+            )
+          }
+          return [
+            ...prev,
+            {
+              otherUserId,
+              otherUserName: undefined,
+              lastMessage: chatMessage.content,
+              lastTimestamp: chatMessage.timestamp,
+              unreadCount: 1,
+              isLastFromMe: false,
+            },
+          ]
+        })
+      }
+    })
+  }, [wsMessages, user?.user_id])
+
+  useEffect(() => {
+    if (selectedConversation && messages[selectedConversation.otherUserId]) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+  }, [messages, selectedConversation])
+
+  useEffect(() => {
+    if (!showNewChatDialog || !searchQuery.trim() || !token) {
+      setSearchResults([])
+      return
+    }
+
+    const searchUsers = async () => {
+      setIsSearching(true)
+      try {
+        const results = await orchestratorApi.searchUsers(token, refreshToken, searchQuery)
+        setSearchResults(results.users.filter((u) => u.user_id !== user?.user_id))
+      } catch (error) {
+        console.error("Failed to search users:", error)
+        setSearchResults([])
+      } finally {
+        setIsSearching(false)
+      }
+    }
+
+    const debounceTimeout = setTimeout(searchUsers, 300)
+    return () => clearTimeout(debounceTimeout)
+  }, [searchQuery, showNewChatDialog, token, refreshToken, user?.user_id])
+
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!messageInput.trim()) return
-    // Handle send message
+    if (!messageInput.trim() || !selectedConversation || !user?.user_id) return
+
+    const content = messageInput.trim()
     setMessageInput("")
+
+    if (connectionState === "connected") {
+      const result = sendWebSocketMessage(selectedConversation.otherUserId, content)
+      if (result.success) {
+        const newMessage: ChatMessage = {
+          messageId: `temp-${Date.now()}`,
+          senderId: user.user_id,
+          recipientId: selectedConversation.otherUserId,
+          content,
+          timestamp: new Date().toISOString(),
+          type: "text",
+          status: "sending",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+
+        setMessages((prev) => ({
+          ...prev,
+          [selectedConversation.otherUserId]: [...(prev[selectedConversation.otherUserId] || []), newMessage],
+        }))
+
+        setConversations((prev) => {
+          return prev.map((c) =>
+            c.otherUserId === selectedConversation.otherUserId
+              ? {
+                  ...c,
+                  lastMessage: content,
+                  lastTimestamp: newMessage.timestamp,
+                  isLastFromMe: true,
+                }
+              : c,
+          )
+        })
+      } else {
+        console.error("Failed to send message:", result.error)
+      }
+    } else {
+      console.warn("WebSocket not connected. Cannot send message.")
+    }
   }
+
+  const handleStartConversation = (selectedUser: User) => {
+    const existingConversation = conversations.find((conv) => conv.otherUserId === selectedUser.user_id)
+
+    if (existingConversation) {
+      setSelectedConversation(existingConversation)
+      markConversationAsSeen(existingConversation.otherUserId)
+    } else {
+      const newConversation: Conversation = {
+        otherUserId: selectedUser.user_id,
+        otherUserName: selectedUser.user_name,
+        lastMessage: "Start a conversation",
+        lastTimestamp: new Date().toISOString(),
+        unreadCount: 0,
+        isLastFromMe: false,
+      }
+      setConversations((prev) => [newConversation, ...prev])
+      setSelectedConversation(newConversation)
+      setMessages((prev) => ({ ...prev, [selectedUser.user_id]: [] }))
+    }
+
+    setShowNewChatDialog(false)
+    setSearchQuery("")
+    setSearchResults([])
+  }
+
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp)
+    const now = new Date()
+    const diff = now.getTime() - date.getTime()
+    const minutes = Math.floor(diff / 60000)
+    const hours = Math.floor(diff / 3600000)
+    const days = Math.floor(diff / 86400000)
+
+    if (minutes < 1) return "Just now"
+    if (minutes < 60) return `${minutes}m ago`
+    if (hours < 24) return `${hours}h ago`
+    if (days < 7) return `${days}d ago`
+    return date.toLocaleDateString()
+  }
+
+  const formatMessageTime = (timestamp: string) => {
+    const date = new Date(timestamp)
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  }
+
+  const currentUserId = getCurrentUserId()
+
+  if (!isHydrated) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <div className="container mx-auto px-4 py-6">
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated || !user) {
+    return null
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <div className="container mx-auto px-4 py-6">
+          <p className="text-muted-foreground">Loading conversations...</p>
+        </div>
+      </div>
+    )
+  }
+
+  const selectedMessages = selectedConversation ? messages[selectedConversation.otherUserId] || [] : []
+  const selectedConversationName =
+    selectedConversation?.otherUserName ||
+    (selectedConversation ? `User ${selectedConversation.otherUserId.slice(0, 8)}` : "Select a conversation")
 
   return (
     <div className="min-h-screen bg-background">
@@ -78,7 +338,13 @@ export default function MessagesPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
           <div className="md:col-span-1 border border-border rounded-2xl overflow-hidden bg-card animate-slide-in-left">
             <div className="p-4 border-b border-border">
-              <h2 className="text-2xl font-bold mb-4">Messages</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold">Messages</h2>
+                <Button onClick={() => setShowNewChatDialog(true)} size="sm" className="magnetic-button">
+                  <Plus className="h-4 w-4 mr-1" />
+                  New
+                </Button>
+              </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input placeholder="Search conversations..." className="pl-10" />
@@ -86,96 +352,186 @@ export default function MessagesPage() {
             </div>
 
             <div className="overflow-y-auto h-[calc(100%-120px)]">
-              {conversations.map((conversation, index) => (
-                <button
-                  key={conversation.id}
-                  onClick={() => setSelectedConversation(conversation)}
-                  className={`w-full p-4 flex items-center gap-3 hover:bg-muted/50 transition-colors border-b border-border animate-float-in-up stagger-${index + 1} ${
-                    selectedConversation.id === conversation.id ? "bg-muted" : ""
-                  }`}
-                >
-                  <div className="relative">
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage src={conversation.avatar || "/placeholder.svg"} />
-                      <AvatarFallback>{conversation.name[0]}</AvatarFallback>
-                    </Avatar>
-                    {conversation.online && (
-                      <div className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 border-2 border-card" />
-                    )}
-                  </div>
-                  <div className="flex-1 text-left">
-                    <div className="flex items-center justify-between mb-1">
-                      <h3 className="font-semibold text-foreground">{conversation.name}</h3>
-                      <span className="text-xs text-muted-foreground">{conversation.time}</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground truncate">{conversation.lastMessage}</p>
-                  </div>
-                  {conversation.unread > 0 && (
-                    <Badge className="bg-primary text-primary-foreground">{conversation.unread}</Badge>
-                  )}
-                </button>
-              ))}
+              {conversations.length === 0 ? (
+                <div className="p-4 text-center text-muted-foreground">
+                  <p>No conversations yet</p>
+                </div>
+              ) : (
+                conversations.map((conversation, index) => {
+                  const isSelected = selectedConversation?.otherUserId === conversation.otherUserId
+                  return (
+                    <button
+                      key={conversation.otherUserId}
+                      onClick={() => {
+                        setSelectedConversation(conversation)
+                        markConversationAsSeen(conversation.otherUserId)
+                        setConversations((prev) =>
+                          prev.map((conv) =>
+                            conv.otherUserId === conversation.otherUserId ? { ...conv, unreadCount: 0 } : conv,
+                          ),
+                        )
+                      }}
+                      className={`w-full p-4 flex items-center gap-3 hover:bg-muted/50 transition-colors border-b border-border animate-float-in-up stagger-${index + 1} ${
+                        isSelected ? "bg-muted" : ""
+                      }`}
+                    >
+                      <div className="relative">
+                        <Avatar className="h-12 w-12">
+                          <AvatarImage src="/placeholder.svg?height=40&width=40" />
+                          <AvatarFallback>
+                            {conversation.otherUserName?.[0] || conversation.otherUserId[0]}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
+                      <div className="flex-1 text-left">
+                        <div className="flex items-center justify-between mb-1">
+                          <h3 className="font-semibold text-foreground">
+                            {conversation.otherUserName || `User ${conversation.otherUserId.slice(0, 8)}`}
+                          </h3>
+                          <span className="text-xs text-muted-foreground">
+                            {formatTime(conversation.lastTimestamp)}
+                          </span>
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {conversation.isLastFromMe && <span className="text-muted-foreground/70">You: </span>}
+                          {conversation.lastMessage}
+                        </p>
+                      </div>
+                      {conversation.unreadCount > 0 && (
+                        <Badge className="bg-primary text-primary-foreground">{conversation.unreadCount}</Badge>
+                      )}
+                    </button>
+                  )
+                })
+              )}
             </div>
           </div>
 
           <div className="md:col-span-2 border border-border rounded-2xl overflow-hidden bg-card flex flex-col animate-slide-in-right">
-            {/* Chat Header */}
-            <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-10 w-10">
-                  <AvatarImage src={selectedConversation.avatar || "/placeholder.svg"} />
-                  <AvatarFallback>{selectedConversation.name[0]}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <h3 className="font-semibold text-foreground">{selectedConversation.name}</h3>
-                  <p className="text-xs text-muted-foreground">
-                    {selectedConversation.online ? "Active now" : "Offline"}
-                  </p>
-                </div>
-              </div>
-              <Button variant="ghost" size="icon">
-                <MoreVertical className="h-5 w-5" />
-              </Button>
-            </div>
-
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              {messages.map((message, index) => (
-                <div
-                  key={message.id}
-                  className={`flex ${message.isOwn ? "justify-end" : "justify-start"} animate-float-in-up stagger-${index + 1}`}
-                >
-                  <div className={`max-w-[70%] ${message.isOwn ? "order-2" : "order-1"}`}>
-                    <div
-                      className={`rounded-2xl px-4 py-3 ${
-                        message.isOwn ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
-                      }`}
-                    >
-                      <p className="text-sm">{message.content}</p>
+            {selectedConversation ? (
+              <>
+                <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage src="/placeholder.svg?height=40&width=40" />
+                      <AvatarFallback>{selectedConversationName[0]}</AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <h3 className="font-semibold text-foreground">{selectedConversationName}</h3>
+                      <p className="text-xs text-muted-foreground">Offline</p>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1 px-2">{message.time}</p>
                   </div>
+                  <Button variant="ghost" size="icon">
+                    <MoreVertical className="h-5 w-5" />
+                  </Button>
                 </div>
-              ))}
-            </div>
 
-            {/* Message Input */}
-            <form onSubmit={handleSend} className="p-4 border-t border-border">
-              <div className="flex gap-2">
-                <Input
-                  value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  placeholder="Type a message..."
-                  className="flex-1 h-12"
-                />
-                <Button type="submit" size="icon" className="h-12 w-12 magnetic-button">
-                  <Send className="h-5 w-5" />
-                </Button>
+                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  {selectedMessages.length === 0 ? (
+                    <p className="text-center text-muted-foreground">No messages yet</p>
+                  ) : (
+                    selectedMessages.map((message, index) => {
+                      const isOwn = currentUserId === message.senderId
+                      return (
+                        <div
+                          key={message.messageId}
+                          className={`flex ${isOwn ? "justify-end" : "justify-start"} animate-float-in-up stagger-${index + 1}`}
+                        >
+                          <div className={`max-w-[70%] ${isOwn ? "order-2" : "order-1"}`}>
+                            <div
+                              className={`rounded-2xl px-4 py-3 ${
+                                isOwn ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+                              }`}
+                            >
+                              <p className="text-sm">{message.content}</p>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1 px-2">
+                              {formatMessageTime(message.timestamp)}
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                <form onSubmit={handleSend} className="p-4 border-t border-border">
+                  {connectionState !== "connected" && (
+                    <p className="text-xs text-muted-foreground mb-2">
+                      WebSocket not connected. Messages may not be sent.
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <Input
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      placeholder="Type a message..."
+                      className="flex-1 h-12"
+                      disabled={connectionState !== "connected"}
+                    />
+                    <Button
+                      type="submit"
+                      size="icon"
+                      className="h-12 w-12 magnetic-button"
+                      disabled={connectionState !== "connected" || !messageInput.trim()}
+                    >
+                      <Send className="h-5 w-5" />
+                    </Button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-muted-foreground">Select a conversation to start messaging</p>
               </div>
-            </form>
+            )}
           </div>
         </div>
       </div>
+
+      <Dialog open={showNewChatDialog} onOpenChange={setShowNewChatDialog}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] bg-card/95 backdrop-blur-xl border-2 border-border/50 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle>Start New Chat</DialogTitle>
+            <DialogDescription>Search for a user by name to start a conversation</DialogDescription>
+          </DialogHeader>
+
+          <Command className="rounded-lg border min-h-[400px]">
+            <CommandInput placeholder="Search users by name..." value={searchQuery} onValueChange={setSearchQuery} />
+            <CommandList>
+              {isSearching ? (
+                <div className="flex items-center justify-center p-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : searchQuery && searchResults.length === 0 ? (
+                <CommandEmpty>No users found</CommandEmpty>
+              ) : searchResults.length > 0 ? (
+                <CommandGroup heading="Users">
+                  {searchResults.map((user) => (
+                    <CommandItem
+                      key={user.user_id}
+                      onSelect={() => handleStartConversation(user)}
+                      className="flex items-center gap-3 p-4 cursor-pointer hover:bg-muted"
+                    >
+                      <Avatar className="h-12 w-12">
+                        <AvatarImage src="/placeholder.svg?height=48&width=48" />
+                        <AvatarFallback>{user.user_name[0]}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1">
+                        <p className="font-semibold">{user.user_name}</p>
+                        <p className="text-sm text-muted-foreground">{user.email}</p>
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ) : (
+                <div className="p-8 text-center text-sm text-muted-foreground">Start typing to search for users</div>
+              )}
+            </CommandList>
+          </Command>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
