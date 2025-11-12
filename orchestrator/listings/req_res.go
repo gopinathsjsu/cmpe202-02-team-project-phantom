@@ -194,3 +194,15 @@ type FetchFlaggedListingsResponse struct {
 	FlaggedListings []FlaggedListing `json:"flagged_listings"`
 	Count           int              `json:"count"`
 }
+
+// FlagListingRequest for flagging a listing
+type FlagListingRequest struct {
+	ListingID int64      `json:"listing_id"`
+	Reason    FlagReason `json:"reason"`
+	Details   *string    `json:"details,omitempty"`
+}
+
+// FlagListingResponse returns the flagged listing
+type FlagListingResponse struct {
+	FlaggedListing FlaggedListing `json:"flagged_listing"`
+}

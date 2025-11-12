@@ -108,6 +108,13 @@ const (
 	FlagStatusDismissed   FlagStatus = "DISMISSED"
 )
 
+// CreateFlagParams represents the parameters for creating a flag
+type CreateFlagParams struct {
+	ListingID int64      `json:"listing_id"`
+	Reason    FlagReason `json:"reason"`
+	Details   *string    `json:"details,omitempty"`
+}
+
 // FlaggedListing represents a flagged listing with both flag and listing information
 type FlaggedListing struct {
 	// Flag information

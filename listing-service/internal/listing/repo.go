@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -427,4 +428,68 @@ func (s *Store) GetFlaggedListings(ctx context.Context, status *string) ([]model
 	}
 
 	return out, rows.Err()
+}
+
+// FlagListing creates a new flag for a listing
+func (s *Store) FlagListing(ctx context.Context, listingID int64, reporterUserID string, p models.CreateFlagParams) (models.FlaggedListing, error) {
+	// First verify the listing exists
+	var listing models.Listing
+	err := s.P.QueryRow(ctx, `SELECT id,title,description,price,category,user_id,status,created_at FROM listings WHERE id=$1`, listingID).
+		Scan(&listing.ID, &listing.Title, &listing.Description, &listing.Price, &listing.Category, &listing.UserID, &listing.Status, &listing.CreatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return models.FlaggedListing{}, fmt.Errorf("listing not found")
+		}
+		return models.FlaggedListing{}, fmt.Errorf("failed to verify listing: %w", err)
+	}
+
+	// Parse reporter user ID
+	reporterUUID, err := uuid.Parse(reporterUserID)
+	if err != nil {
+		return models.FlaggedListing{}, fmt.Errorf("invalid reporter user ID: %w", err)
+	}
+
+	// Insert the flag into flagged_listings table
+	// Status defaults to 'OPEN' as per database schema
+	const insertFlagQuery = `
+		INSERT INTO flagged_listings (listing_id, reporter_user_id, reason, details, status)
+		VALUES ($1, $2::uuid, $3, $4, 'OPEN')
+		RETURNING id, listing_id, reporter_user_id, reason, details, status, reviewer_user_id, resolution_notes, created_at, updated_at, resolved_at
+	`
+
+	var fl models.FlaggedListing
+	err = s.P.QueryRow(ctx, insertFlagQuery, listingID, reporterUUID, p.Reason, p.Details).
+		Scan(
+			&fl.FlagID,
+			&fl.ListingID,
+			&fl.ReporterUserID,
+			&fl.Reason,
+			&fl.Details,
+			&fl.Status,
+			&fl.ReviewerUserID,
+			&fl.ResolutionNotes,
+			&fl.FlagCreatedAt,
+			&fl.FlagUpdatedAt,
+			&fl.FlagResolvedAt,
+		)
+	if err != nil {
+		return models.FlaggedListing{}, fmt.Errorf("failed to create flag: %w", err)
+	}
+
+	// Update listing status to REPORTED when flagged
+	// Always update status to REPORTED regardless of current status
+	_, err = s.P.Exec(ctx, `UPDATE listings SET status='REPORTED' WHERE id=$1`, listingID)
+	if err != nil {
+		log.Printf("Warning: Failed to update listing status to REPORTED: %v", err)
+		// Don't fail the flag creation if status update fails
+	} else {
+		// Update the local listing status for the response
+		listing.Status = models.StReported
+	}
+
+	// Set the listing information
+	fl.Listing = listing
+
+	log.Println("Flag created successfully for listing:", listingID)
+	return fl, nil
 }
