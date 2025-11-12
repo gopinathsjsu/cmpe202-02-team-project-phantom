@@ -9,6 +9,24 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   MessageSquare,
   Clock,
   ChevronLeft,
@@ -22,8 +40,9 @@ import {
 import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import { orchestratorApi } from "@/lib/api/orchestrator"
-import type { Listing } from "@/lib/api/types"
+import type { Listing, FlagReason } from "@/lib/api/types"
 import { formatPrice, formatTimeAgo, mapCategoryToDisplay } from "@/lib/utils/listings"
+import { useToast } from "@/hooks/use-toast"
 
 export default function ListingDetailPage() {
   const router = useRouter()
@@ -35,6 +54,11 @@ export default function ListingDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [isSaved, setIsSaved] = useState(false)
+  const [flagDialogOpen, setFlagDialogOpen] = useState(false)
+  const [flagReason, setFlagReason] = useState<FlagReason | "">("")
+  const [flagDetails, setFlagDetails] = useState("")
+  const [flagging, setFlagging] = useState(false)
+  const { toast } = useToast()
 
   const listingId = params?.id ? parseInt(params.id as string, 10) : null
 
@@ -108,6 +132,58 @@ export default function ListingDetailPage() {
   const prevImage = () => {
     setCurrentImageIndex((prev) => (prev - 1 + images.length) % images.length)
   }
+
+  const handleFlagListing = async () => {
+    if (!flagReason || !listingId || !token || !refreshToken) {
+      toast({
+        title: "Error",
+        description: "Please select a reason for flagging this listing.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setFlagging(true)
+      await orchestratorApi.flagListing(
+        token,
+        refreshToken,
+        listingId,
+        flagReason as FlagReason,
+        flagDetails || undefined,
+      )
+      toast({
+        title: "Listing Flagged",
+        description: "Thank you for reporting this listing. Our team will review it shortly.",
+      })
+      setFlagDialogOpen(false)
+      setFlagReason("")
+      setFlagDetails("")
+      // Refresh the listing to show updated status
+      if (listingId && token && refreshToken) {
+        const updatedListing = await orchestratorApi.getListingById(token, refreshToken, listingId)
+        setListing(updatedListing)
+      }
+    } catch (err) {
+      console.error("Error flagging listing:", err)
+      const errorMessage = err instanceof Error ? err.message : "Failed to flag listing"
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setFlagging(false)
+    }
+  }
+
+  const flagReasons: { value: FlagReason; label: string }[] = [
+    { value: "SPAM", label: "Spam" },
+    { value: "SCAM", label: "Scam" },
+    { value: "INAPPROPRIATE", label: "Inappropriate Content" },
+    { value: "MISLEADING", label: "Misleading Information" },
+    { value: "OTHER", label: "Other" },
+  ]
 
   // Show loading state
   if (!isHydrated || loading) {
@@ -347,13 +423,80 @@ export default function ListingDetailPage() {
                 </CardContent>
               </Card>
 
-              <Button
-                variant="outline"
-                className="w-full h-12 text-muted-foreground hover:text-destructive hover:border-destructive magnetic-button bg-transparent"
-              >
-                <Flag className="mr-2 h-5 w-5" />
-                Report this listing
-              </Button>
+              <Dialog open={flagDialogOpen} onOpenChange={setFlagDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full h-12 text-muted-foreground hover:text-destructive hover:border-destructive magnetic-button bg-transparent"
+                  >
+                    <Flag className="mr-2 h-5 w-5" />
+                    Report this listing
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[500px]">
+                  <DialogHeader>
+                    <DialogTitle>Report Listing</DialogTitle>
+                    <DialogDescription>
+                      Help us keep our marketplace safe by reporting listings that violate our policies.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="flag-reason">Reason for reporting *</Label>
+                      <Select value={flagReason} onValueChange={(value) => setFlagReason(value as FlagReason)}>
+                        <SelectTrigger id="flag-reason" className="w-full">
+                          <SelectValue placeholder="Select a reason" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {flagReasons.map((reason) => (
+                            <SelectItem key={reason.value} value={reason.value}>
+                              {reason.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="flag-details">Additional details (optional)</Label>
+                      <Textarea
+                        id="flag-details"
+                        placeholder="Please provide any additional information that might help us review this listing..."
+                        value={flagDetails}
+                        onChange={(e) => setFlagDetails(e.target.value)}
+                        className="min-h-24"
+                        maxLength={500}
+                      />
+                      <p className="text-xs text-muted-foreground">{flagDetails.length}/500 characters</p>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setFlagDialogOpen(false)
+                        setFlagReason("")
+                        setFlagDetails("")
+                      }}
+                      disabled={flagging}
+                    >
+                      Cancel
+                    </Button>
+                    <Button onClick={handleFlagListing} disabled={flagging || !flagReason}>
+                      {flagging ? (
+                        <>
+                          <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                          Reporting...
+                        </>
+                      ) : (
+                        <>
+                          <Flag className="mr-2 h-4 w-4" />
+                          Report Listing
+                        </>
+                      )}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
         </div>

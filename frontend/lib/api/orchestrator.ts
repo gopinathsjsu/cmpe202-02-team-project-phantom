@@ -12,6 +12,9 @@ import type {
   FetchAllListingsRequest,
   FetchAllListingsResponse,
   Listing,
+  FlagListingRequest,
+  FlagListingResponse,
+  FlagReason,
 } from "./types"
 import { isTokenExpired } from "@/lib/utils/jwt"
 
@@ -501,6 +504,98 @@ export const orchestratorApi = {
           throw new Error("Listing not found")
         }
         return retryResponse
+      },
+    )
+  },
+
+  /**
+   * Flag a listing
+   * @param token - Access token
+   * @param refreshToken - Refresh token
+   * @param listingId - Listing ID to flag
+   * @param reason - Flag reason
+   * @param details - Optional details
+   * @param tokenUpdateCallback - Optional callback for token updates
+   * @returns Flagged listing response
+   */
+  async flagListing(
+    token: string,
+    refreshToken: string,
+    listingId: number,
+    reason: FlagReason,
+    details?: string,
+    tokenUpdateCallback?: (newToken: string, newRefreshToken: string) => void,
+  ): Promise<FlagListingResponse> {
+    const validToken = isTokenExpired(token) ? await getValidToken(refreshToken) : token
+    if (!validToken) {
+      throw new Error("Authentication required")
+    }
+
+    const url = `${ORCHESTRATOR_URL}/api/listings/flag/${listingId}`
+    const body: FlagListingRequest = {
+      listing_id: listingId,
+      reason,
+      details,
+    }
+
+    const makeRequest = () =>
+      fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      })
+
+    const response = await makeRequest()
+
+    if (response.status === 401) {
+      // Token expired, refresh and retry
+      const newToken = await getValidToken(refreshToken)
+      if (!newToken) {
+        throw new Error("Authentication failed")
+      }
+      const retryResponse = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${newToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      })
+      return handleResponse<FlagListingResponse>(
+        retryResponse,
+        refreshToken,
+        tokenUpdateCallback || undefined,
+        async () => {
+          const retryToken = await getValidToken(refreshToken)
+          return fetch(url, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${retryToken || newToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+          })
+        },
+      )
+    }
+
+    return handleResponse<FlagListingResponse>(
+      response,
+      refreshToken,
+      tokenUpdateCallback || undefined,
+      async () => {
+        const newToken = await getValidToken(refreshToken)
+        return fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${newToken || validToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        })
       },
     )
   },

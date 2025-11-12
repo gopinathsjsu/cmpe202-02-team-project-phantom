@@ -101,3 +101,13 @@ export interface FetchAllListingsResponse {
   count: number
 }
 
+export interface FlagListingRequest {
+  listing_id: number
+  reason: FlagReason
+  details?: string
+}
+
+export interface FlagListingResponse {
+  flagged_listing: FlaggedListing
+}
+
