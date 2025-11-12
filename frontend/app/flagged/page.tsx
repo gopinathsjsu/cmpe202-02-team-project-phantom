@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/hooks/use-auth"
 import { orchestratorApi } from "@/lib/api/orchestrator"
 import type { FlaggedListing, FlagStatus } from "@/lib/api/types"
-import { AlertCircle, Flag, Clock, User, FileText } from "lucide-react"
+import { AlertCircle, Flag, Clock, User, FileText, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 
 export default function FlaggedListingsPage() {
@@ -148,6 +148,14 @@ export default function FlaggedListingsPage() {
 
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 animate-float-in-up">
+          <div className="flex items-center gap-4 mb-4">
+            <Button asChild variant="ghost" size="sm" className="magnetic-button">
+              <Link href="/admin/dashboard" className="flex items-center gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                Back to Dashboard
+              </Link>
+            </Button>
+          </div>
           <div className="flex items-center justify-between">
             <div>
               <h1 className="mb-2 text-4xl font-bold text-foreground flex items-center gap-2">

@@ -8,7 +8,6 @@ import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Slider } from "@/components/ui/slider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
@@ -44,7 +43,7 @@ export default function ListingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("")
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
+  const [selectedCategory, setSelectedCategory] = useState<string>("")
   const [priceRange, setPriceRange] = useState([0, 1000])
   const [debouncedPriceRange, setDebouncedPriceRange] = useState([0, 1000])
   const [statusFilter, setStatusFilter] = useState<DisplayStatus>("Available")
@@ -154,10 +153,12 @@ export default function ListingsPage() {
         }
       }
 
-      // Add category filter (use first selected category, backend doesn't support multiple)
-      if (selectedCategories.length > 0) {
-        const backendCategory = mapDisplayToCategory(selectedCategories[0])
-        filters.category = backendCategory
+      // Add category filter
+      if (selectedCategory) {
+        const backendCategory = mapDisplayToCategory(selectedCategory)
+        if (backendCategory) {
+          filters.category = backendCategory
+        }
       }
 
       // Add price range filter (convert dollars to cents)
@@ -176,7 +177,7 @@ export default function ListingsPage() {
 
       return filters
     },
-    [debouncedSearchQuery, selectedCategories, debouncedPriceRange, statusFilter, sortBy],
+    [debouncedSearchQuery, selectedCategory, debouncedPriceRange, statusFilter, sortBy],
   )
 
   // Fetch initial listings from API (resets the list)
@@ -404,14 +405,12 @@ export default function ListingsPage() {
     }
   }, [listings.length, loading]) // Only depend on listings.length and loading, not loadMoreListings
 
-  const toggleCategory = (category: string) => {
-    setSelectedCategories((prev) =>
-      prev.includes(category) ? prev.filter((c) => c !== category) : [...prev, category],
-    )
+  const handleCategoryChange = (category: string) => {
+    setSelectedCategory(category === "All" ? "" : category)
   }
 
   const clearFilters = () => {
-    setSelectedCategories([])
+    setSelectedCategory("")
     setPriceRange([0, 1000])
     setDebouncedPriceRange([0, 1000])
     setStatusFilter("Available")
@@ -439,23 +438,19 @@ export default function ListingsPage() {
 
       <div>
         <Label className="mb-3 block text-base font-semibold">Category</Label>
-        <div className="space-y-2">
-          {categories.map((category) => (
-            <div key={category} className="flex items-center space-x-2">
-              <Checkbox
-                id={`category-${category}`}
-                checked={selectedCategories.includes(category)}
-                onCheckedChange={() => toggleCategory(category)}
-              />
-              <label
-                htmlFor={`category-${category}`}
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-              >
+        <Select value={selectedCategory || "All"} onValueChange={handleCategoryChange}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Select category" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="All">All Categories</SelectItem>
+            {categories.map((category) => (
+              <SelectItem key={category} value={category}>
                 {category}
-              </label>
-            </div>
-          ))}
-        </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div>
@@ -550,7 +545,7 @@ export default function ListingsPage() {
           </aside>
 
           <div className="flex-1">
-            {(selectedCategories.length > 0 ||
+            {(selectedCategory ||
               debouncedPriceRange[0] > 0 ||
               debouncedPriceRange[1] < 1000 ||
               debouncedSearchQuery ||
@@ -567,14 +562,17 @@ export default function ListingsPage() {
                     </button>
                   </Badge>
                 )}
-                {selectedCategories.map((category) => (
-                  <Badge key={category} variant="secondary" className="gap-1 px-3 py-1 text-sm">
-                    {category}
-                    <button onClick={() => toggleCategory(category)} className="ml-1 hover:text-destructive">
+                {selectedCategory && (
+                  <Badge variant="secondary" className="gap-1 px-3 py-1 text-sm">
+                    Category: {selectedCategory}
+                    <button
+                      onClick={() => setSelectedCategory("")}
+                      className="ml-1 hover:text-destructive"
+                    >
                       <X className="h-3 w-3" />
                     </button>
                   </Badge>
-                ))}
+                )}
                 {debouncedSearchQuery && (
                   <Badge variant="secondary" className="gap-1 px-3 py-1 text-sm">
                     Search: {debouncedSearchQuery}
@@ -613,7 +611,7 @@ export default function ListingsPage() {
               <Card className="animate-float-in-up">
                 <CardContent className="py-12 text-center">
                   <p className="text-lg text-muted-foreground">No listings found</p>
-                  {(selectedCategories.length > 0 ||
+                  {(selectedCategory ||
                     debouncedPriceRange[0] > 0 ||
                     debouncedPriceRange[1] < 1000 ||
                     debouncedSearchQuery ||

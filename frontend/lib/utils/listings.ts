@@ -6,13 +6,13 @@
 export type BackendCategory = "TEXTBOOK" | "GADGET" | "ESSENTIAL" | "NON-ESSENTIAL" | "OTHER" | "TEST"
 
 // Frontend display category names
-export type DisplayCategory = "Textbooks" | "Electronics" | "Furniture" | "Non-Essential" | "Other"
+export type DisplayCategory = "Textbooks" | "Electronics" | "Essentials" | "Non-Essential" | "Other"
 
 // Category mapping from backend to frontend display
 const CATEGORY_TO_DISPLAY: Record<BackendCategory, DisplayCategory> = {
   TEXTBOOK: "Textbooks",
   GADGET: "Electronics",
-  ESSENTIAL: "Furniture",
+  ESSENTIAL: "Essentials",
   "NON-ESSENTIAL": "Non-Essential",
   OTHER: "Other",
   TEST: "Other", // Hide TEST category from users, map to Other
@@ -22,7 +22,7 @@ const CATEGORY_TO_DISPLAY: Record<BackendCategory, DisplayCategory> = {
 const DISPLAY_TO_CATEGORY: Record<DisplayCategory, BackendCategory> = {
   Textbooks: "TEXTBOOK",
   Electronics: "GADGET",
-  Furniture: "ESSENTIAL",
+  Essentials: "ESSENTIAL",
   "Non-Essential": "NON-ESSENTIAL",
   Other: "OTHER",
 }
@@ -129,7 +129,7 @@ export function mapDisplayToCategory(displayName: string): BackendCategory {
  * @returns Array of display category names
  */
 export function getDisplayCategories(): DisplayCategory[] {
-  return ["Textbooks", "Electronics", "Furniture", "Non-Essential", "Other"]
+  return ["Textbooks", "Electronics", "Essentials", "Non-Essential", "Other"]
 }
 
 /**
