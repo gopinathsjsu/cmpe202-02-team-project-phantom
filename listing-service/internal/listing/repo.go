@@ -71,6 +71,27 @@ func (s *Store) GetUserLists(ctx context.Context, user_id string) ([]models.List
 	return out, rows.Err()
 }
 
+func (s *Store) GetListingsByUserID(ctx context.Context, targetUserID string) ([]models.Listing, error) {
+	const q = `SELECT id,title,description,price,category,user_id,status,created_at FROM listings WHERE user_id=$1::uuid`
+	var args []any
+	args = append(args, targetUserID)
+	rows, err := s.P.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.Listing
+	for rows.Next() {
+		var l models.Listing
+		if err := rows.Scan(&l.ID, &l.Title, &l.Description, &l.Price, &l.Category, &l.UserID, &l.Status, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) List(ctx context.Context, f *models.ListFilters) ([]models.Listing, error) {
 	hasKeywords := len(f.Keywords) > 0
 
@@ -205,7 +226,7 @@ func (s *Store) List(ctx context.Context, f *models.ListFilters) ([]models.Listi
 	return out, rows.Err()
 }
 
-func (s *Store) Update(ctx context.Context, id int64, userID string, p models.UpdateParams) (models.Listing, error) {
+func (s *Store) Update(ctx context.Context, id int64, userID string, userRole string, p models.UpdateParams) (models.Listing, error) {
 	// Build dynamic SET clause with positional parameters
 	var sets []string
 	var args []any
@@ -243,17 +264,27 @@ func (s *Store) Update(ctx context.Context, id int64, userID string, p models.Up
 
 	// WHERE placeholders use the next indexes
 	whereIDIdx := i
-	whereUserIdx := i + 1
 
-	q := fmt.Sprintf(`
-		UPDATE listings
-		SET %s
-		WHERE id=$%d AND user_id=$%d
-		RETURNING id, title, description, price, category, user_id, status, created_at
-	`, strings.Join(sets, ","), whereIDIdx, whereUserIdx)
-
-	// args order must match placeholders strictly
-	args = append(args, id, userID) // if user_id is UUID, you can use userID or cast: $%d::uuid
+	// Admin can update any listing, regular user can only update their own
+	var q string
+	if userRole == string(httplib.ADMIN) {
+		q = fmt.Sprintf(`
+			UPDATE listings
+			SET %s
+			WHERE id=$%d
+			RETURNING id, title, description, price, category, user_id, status, created_at
+		`, strings.Join(sets, ","), whereIDIdx)
+		args = append(args, id)
+	} else {
+		whereUserIdx := i + 1
+		q = fmt.Sprintf(`
+			UPDATE listings
+			SET %s
+			WHERE id=$%d AND user_id=$%d
+			RETURNING id, title, description, price, category, user_id, status, created_at
+		`, strings.Join(sets, ","), whereIDIdx, whereUserIdx)
+		args = append(args, id, userID)
+	}
 
 	var l models.Listing
 	err := s.P.QueryRow(ctx, q, args...).

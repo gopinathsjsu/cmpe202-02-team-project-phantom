@@ -95,7 +95,7 @@ func (h *Handlers) ListHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 
-	userID, err := common.ValidateUserAndRoleAuth(w, r)
+	userID, userRole, err := common.ValidateUserAndRoleAuthWithRole(w, r)
 	if err != nil {
 		return
 	}
@@ -108,7 +108,7 @@ func (h *Handlers) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("SQL update try from updatehandler")
-	l, err := h.S.Update(r.Context(), id, userID, p)
+	l, err := h.S.Update(r.Context(), id, userID, userRole, p)
 	if err != nil {
 		platform.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -187,6 +187,36 @@ func (h *Handlers) GetUserListsHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		platform.Error(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	platform.JSON(w, http.StatusOK, l)
+}
+
+func (h *Handlers) GetListingsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	// Validate user is authenticated and get role
+	_, userRole, err := common.ValidateUserAndRoleAuthWithRole(w, r)
+	if err != nil {
+		return
+	}
+
+	// Check if user is admin
+	if userRole != string(httplib.ADMIN) {
+		platform.Error(w, http.StatusForbidden, "admin access required")
+		return
+	}
+
+	// Extract user ID from query parameter
+	targetUserID := r.URL.Query().Get("user_id")
+	if targetUserID == "" {
+		platform.Error(w, http.StatusBadRequest, "user_id query parameter is required")
+		return
+	}
+
+	// Fetch listings by user ID
+	l, err := h.S.GetListingsByUserID(r.Context(), targetUserID)
+	if err != nil {
+		platform.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

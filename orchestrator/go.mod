@@ -10,14 +10,11 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/kunal768/cmpe202/http-lib v0.0.0
 	github.com/rabbitmq/amqp091-go v1.10.0
-	github.com/redis/go-redis/v9 v9.16.0
 	go.mongodb.org/mongo-driver v1.14.0
 	golang.org/x/crypto v0.41.0
 )
 
 require (
-	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
