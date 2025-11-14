@@ -83,6 +83,16 @@ type FetchUserListingsResponse struct {
 	Listings []Listing `json:"listings"`
 }
 
+// FetchListingsByUserIDRequest for getting listings by user ID (admin only)
+type FetchListingsByUserIDRequest struct {
+	UserID uuid.UUID `json:"user_id"`
+}
+
+// FetchListingsByUserIDResponse returns listings for a specific user
+type FetchListingsByUserIDResponse struct {
+	Listings []Listing `json:"listings"`
+}
+
 // UpdateListingRequest for updating a listing
 type UpdateListingRequest struct {
 	ID          int64     `json:"id"`

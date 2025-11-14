@@ -29,6 +29,7 @@ type Service interface {
 	FetchAllListings(ctx context.Context, req FetchAllListingsRequest) (*FetchAllListingsResponse, error)
 	FetchListing(ctx context.Context, req FetchListingRequest) (*FetchListingResponse, error)
 	FetchUserListings(ctx context.Context) (*FetchUserListingsResponse, error)
+	FetchListingsByUserID(ctx context.Context, req FetchListingsByUserIDRequest) (*FetchListingsByUserIDResponse, error)
 	UpdateListing(ctx context.Context, req UpdateListingRequest) (*UpdateListingResponse, error)
 	/* user can delete only their own listing, admin can delete all listings */
 	DeleteListing(ctx context.Context, req DeleteListingRequest) (*DeleteListingResponse, error)
@@ -258,6 +259,49 @@ func (s *svc) FetchUserListings(ctx context.Context) (*FetchUserListingsResponse
 	}
 
 	return &FetchUserListingsResponse{Listings: listings}, nil
+}
+
+func (s *svc) FetchListingsByUserID(ctx context.Context, req FetchListingsByUserIDRequest) (*FetchListingsByUserIDResponse, error) {
+	// Extract and validate user role - must be admin
+	userID, roleID, err := s.extractUserAndRole(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if user is admin
+	if roleID != string(httplib.ADMIN) {
+		return nil, fmt.Errorf("admin access required")
+	}
+
+	// Build URL with user_id query parameter
+	fullURL := s.config.URL + "/listings/by-user-id?user_id=" + req.UserID.String()
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Forward user ID and role ID headers
+	httpReq.Header.Set("X-User-ID", userID)
+	httpReq.Header.Set("X-Role-ID", roleID)
+
+	resp, err := s.config.Client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var listings []Listing
+	if err := json.NewDecoder(resp.Body).Decode(&listings); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &FetchListingsByUserIDResponse{Listings: listings}, nil
 }
 
 func (s *svc) UpdateListing(ctx context.Context, req UpdateListingRequest) (*UpdateListingResponse, error) {

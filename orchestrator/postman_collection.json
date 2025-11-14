@@ -182,7 +182,8 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"title\": \"Updated Title\",\n  \"price\": 200,\n  \"status\": \"AVAILABLE\"\n}"
-            }
+            },
+            "description": "Update a listing. Regular users can only update their own listings. Admins can update any listing, including changing the status of listings created by other users."
           },
           "response": []
         },
@@ -216,6 +217,25 @@
               "host": ["{{base_url}}"],
               "path": ["api", "listings", "user-lists", ""]
             }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Listings by User ID (Admin Only)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/listings/by-user-id?user_id={{target_user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "listings", "by-user-id"],
+              "query": [
+                { "key": "user_id", "value": "{{target_user_id}}", "description": "UUID of the user whose listings to fetch (required)" }
+              ]
+            },
+            "description": "Admin-only endpoint to fetch all listings created by a specific user. Returns the complete listing model for each listing."
           },
           "response": []
         },
@@ -316,6 +336,25 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Get Flagged Listings (Admin Only)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/listings/flagged?status=",
+              "host": ["{{base_url}}"],
+              "path": ["api", "listings", "flagged"],
+              "query": [
+                { "key": "status", "value": "", "disabled": true, "description": "Optional: Filter by flag status (OPEN, UNDER_REVIEW, RESOLVED, DISMISSED)" }
+              ]
+            },
+            "description": "Admin-only endpoint to fetch all flagged listings. Optionally filter by flag status."
+          },
+          "response": []
         }
       ]
     }
@@ -326,6 +365,7 @@
     { "key": "access_token", "value": "" },
     { "key": "refresh_token", "value": "" },
     { "key": "listing_id", "value": "" },
+    { "key": "target_user_id", "value": "", "description": "UUID of target user for admin endpoints" },
     { "key": "sas_url", "value": "", "description": "SAS URL from Upload Media response" },
     { "key": "file_content_type", "value": "image/jpeg", "description": "Content type of the file being uploaded (e.g., image/jpeg, image/png, image/gif)" }
   ]

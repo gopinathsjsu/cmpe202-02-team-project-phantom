@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	httplib "github.com/kunal768/cmpe202/http-lib"
 )
@@ -275,6 +276,51 @@ func (e *Endpoints) GetUserListingsHandler(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "Failed to fetch user listings",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	httplib.WriteJSON(w, http.StatusOK, response.Listings)
+}
+
+// GetListingsByUserIDHandler handles getting listings by user ID (admin only)
+func (e *Endpoints) GetListingsByUserIDHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract user_id from query parameter
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request",
+			Message: "user_id query parameter is required",
+		})
+		return
+	}
+
+	// Parse user_id as UUID
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request",
+			Message: "Invalid user_id format. Expected UUID",
+		})
+		return
+	}
+
+	req := FetchListingsByUserIDRequest{UserID: userID}
+
+	// Call service (service will validate admin role)
+	response, err := e.service.FetchListingsByUserID(r.Context(), req)
+	if err != nil {
+		// Check if error is due to admin access requirement
+		if err.Error() == "admin access required" {
+			httplib.WriteJSON(w, http.StatusForbidden, ErrorResponse{
+				Error:   "Forbidden",
+				Message: "Admin access required",
+			})
+			return
+		}
+		httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "Failed to fetch listings by user ID",
 			Message: err.Error(),
 		})
 		return
@@ -561,6 +607,7 @@ func (e *Endpoints) RegisterRoutes(mux *http.ServeMux, dbPool *pgxpool.Pool) {
 
 	// Admin-only routes
 	mux.Handle("GET /api/listings/flagged", adminProtected(http.HandlerFunc(e.GetFlaggedListingsHandler)))
+	mux.Handle("GET /api/listings/by-user-id", adminProtected(http.HandlerFunc(e.GetListingsByUserIDHandler)))
 }
 
 // validateCreateListingRequest validates create listing request

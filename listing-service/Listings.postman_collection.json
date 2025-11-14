@@ -330,7 +330,8 @@
 						"update",
 						"{{itemID}}"
 					]
-				}
+				},
+				"description": "Update a listing. Regular users can only update their own listings. Admins can update any listing, including changing the status of listings created by other users."
 			},
 			"response": []
 		},
@@ -433,6 +434,42 @@
 						"flagged"
 					]
 				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Listings by User ID (Admin Only)",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-User-ID",
+						"value": "{{user_id}}",
+						"type": "text"
+					},
+					{
+						"key": "X-Role-ID",
+						"value": "{{user_role}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{listingURL}}/by-user-id?user_id={{target_user_id}}",
+					"host": [
+						"{{listingURL}}"
+					],
+					"path": [
+						"by-user-id"
+					],
+					"query": [
+						{
+							"key": "user_id",
+							"value": "{{target_user_id}}",
+							"description": "UUID of the user whose listings to fetch (required)"
+						}
+					]
+				},
+				"description": "Admin-only endpoint to fetch all listings created by a specific user. Returns the complete listing model for each listing."
 			},
 			"response": []
 		},
@@ -555,6 +592,11 @@
 		{
 			"key": "user_role",
 			"value": ""
+		},
+		{
+			"key": "target_user_id",
+			"value": "",
+			"description": "UUID of target user for admin endpoints"
 		}
 	]
 }
