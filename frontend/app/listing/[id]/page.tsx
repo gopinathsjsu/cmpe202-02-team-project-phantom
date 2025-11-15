@@ -37,6 +37,8 @@ import {
   Shield,
   AlertCircle,
   Edit,
+  Trash2,
+  Loader2,
 } from "lucide-react"
 import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
@@ -59,6 +61,8 @@ export default function ListingDetailPage() {
   const [flagReason, setFlagReason] = useState<FlagReason | "">("")
   const [flagDetails, setFlagDetails] = useState("")
   const [flagging, setFlagging] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const { toast } = useToast()
 
   const listingId = params?.id ? parseInt(params.id as string, 10) : null
@@ -175,6 +179,41 @@ export default function ListingDetailPage() {
       })
     } finally {
       setFlagging(false)
+    }
+  }
+
+  const handleDeleteListing = async () => {
+    if (!listingId || !token || !refreshToken) {
+      toast({
+        title: "Error",
+        description: "Authentication required",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setDeleting(true)
+      await orchestratorApi.deleteListing(token, refreshToken, listingId, true) // Soft delete by default
+
+      toast({
+        title: "Listing Deleted",
+        description: "The listing has been successfully deleted.",
+      })
+
+      // Navigate to profile page after deletion
+      router.push("/profile")
+    } catch (err) {
+      console.error("Error deleting listing:", err)
+      const errorMessage = err instanceof Error ? err.message : "Failed to delete listing"
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setDeleting(false)
+      setDeleteDialogOpen(false)
     }
   }
 
@@ -409,6 +448,53 @@ export default function ListingDetailPage() {
                         <Share2 className="h-5 w-5" />
                       </Button>
                     </div>
+                    {canEdit && (
+                      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                        <DialogTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className="w-full h-12 text-destructive hover:text-destructive hover:bg-destructive/10 hover:border-destructive magnetic-button bg-transparent"
+                          >
+                            <Trash2 className="mr-2 h-5 w-5" />
+                            Delete Listing
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[500px]">
+                          <DialogHeader>
+                            <DialogTitle>Delete Listing</DialogTitle>
+                            <DialogDescription>
+                              Are you sure you want to delete this listing? This action cannot be undone.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <DialogFooter>
+                            <Button
+                              variant="outline"
+                              onClick={() => setDeleteDialogOpen(false)}
+                              disabled={deleting}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              onClick={handleDeleteListing}
+                              disabled={deleting}
+                            >
+                              {deleting ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Deleting...
+                                </>
+                              ) : (
+                                <>
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete Listing
+                                </>
+                              )}
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    )}
                   </div>
                 </CardContent>
               </Card>

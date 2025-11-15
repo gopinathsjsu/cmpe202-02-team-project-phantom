@@ -662,6 +662,97 @@ export const orchestratorApi = {
     )
   },
 
+  async createListing(
+    token: string,
+    refreshToken: string | null,
+    listing: {
+      title: string
+      description?: string
+      price: number
+      category: string
+    },
+  ): Promise<Listing> {
+    const validToken = (await getValidToken(refreshToken)) || token
+
+    const url = `${ORCHESTRATOR_URL}/api/listings/create`
+
+    const body = {
+      title: listing.title,
+      description: listing.description || undefined,
+      price: listing.price,
+      category: listing.category,
+    }
+
+    const makeRequest = () =>
+      fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      })
+
+    const response = await makeRequest()
+
+    return handleResponse<Listing>(
+      response,
+      refreshToken,
+      tokenUpdateCallback || undefined,
+      async () => {
+        const newToken = await getValidToken(refreshToken)
+        return fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${newToken || validToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        })
+      },
+    )
+  },
+
+  async deleteListing(
+    token: string,
+    refreshToken: string | null,
+    listingId: number,
+    hardDelete?: boolean,
+  ): Promise<{ status: string }> {
+    const validToken = (await getValidToken(refreshToken)) || token
+
+    const url = hardDelete
+      ? `${ORCHESTRATOR_URL}/api/listings/delete/${listingId}?hard=true`
+      : `${ORCHESTRATOR_URL}/api/listings/delete/${listingId}`
+
+    const makeRequest = () =>
+      fetch(url, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          "Content-Type": "application/json",
+        },
+      })
+
+    const response = await makeRequest()
+
+    return handleResponse<{ status: string }>(
+      response,
+      refreshToken,
+      tokenUpdateCallback || undefined,
+      async () => {
+        const newToken = await getValidToken(refreshToken)
+        return fetch(url, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${newToken || validToken}`,
+            "Content-Type": "application/json",
+          },
+        })
+      },
+    )
+  },
+
   async updateListing(
     token: string,
     refreshToken: string | null,
