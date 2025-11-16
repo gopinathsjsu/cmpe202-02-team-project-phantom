@@ -128,7 +128,7 @@ func (h *Handlers) DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("hard") == "true" {
 		if err := h.S.Delete(r.Context(), id, userID, userRole); err != nil {
 			platform.Error(w, 500, err.Error())
-			log.Println("Big pooopie delete")
+			log.Println("Error on delete handler")
 			return
 		}
 	} else {
@@ -454,9 +454,141 @@ func (h *Handlers) FlagListingHandler(w http.ResponseWriter, r *http.Request) {
 			platform.Error(w, http.StatusNotFound, "listing not found")
 			return
 		}
+		if err.Error() == "user has already flagged this listing" {
+			platform.Error(w, http.StatusConflict, "you have already flagged this listing")
+			return
+		}
 		platform.Error(w, http.StatusInternalServerError, "failed to flag listing")
 		return
 	}
 
 	platform.JSON(w, http.StatusCreated, flaggedListing)
+}
+
+// UpdateFlagListingHandler handles updating a flagged listing
+func (h *Handlers) UpdateFlagListingHandler(w http.ResponseWriter, r *http.Request) {
+	// Validate user is authenticated
+	userID, userRole, err := common.ValidateUserAndRoleAuthWithRole(w, r)
+	if err != nil {
+		return
+	}
+	log.Println("Pass auth")
+
+	// Check if user is admin
+	if userRole != string(httplib.ADMIN) {
+		platform.Error(w, http.StatusForbidden, "admin access required")
+		return
+	}
+	log.Println("Pass admin auth")
+
+	// Get listing ID from URL path
+	flagIDStr := chi.URLParam(r, "flag_id")
+	if flagIDStr == "" {
+		platform.Error(w, http.StatusBadRequest, "Flagging ID is required")
+		return
+	}
+	log.Println("Got flag id")
+
+	flagID, err := strconv.ParseInt(flagIDStr, 10, 64)
+	if err != nil {
+		platform.Error(w, http.StatusBadRequest, "invalid flagging ID")
+		return
+	}
+	log.Println("Got flag id parsed")
+
+	// Decode request body
+	var req models.UpdateFlagParams
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		platform.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	log.Println("Got update request model")
+
+	// Create the flag
+	flaggedListing, err := h.S.UpdateFlagListing(r.Context(), flagID, userID, req)
+	if err != nil {
+		log.Printf("Error flagging listing: %v", err)
+		if err.Error() == "listing not found" {
+			platform.Error(w, http.StatusNotFound, "listing not found")
+			return
+		}
+		platform.Error(w, http.StatusInternalServerError, "failed to flag listing")
+		return
+	}
+
+	platform.JSON(w, http.StatusCreated, flaggedListing)
+}
+
+// DeleteFlagListingHandler handles deleting a flagged listing (admin only)
+func (h *Handlers) DeleteFlagListingHandler(w http.ResponseWriter, r *http.Request) {
+	// Validate user is authenticated and get role
+	_, userRole, err := common.ValidateUserAndRoleAuthWithRole(w, r)
+	if err != nil {
+		return
+	}
+
+	// Check if user is admin
+	if userRole != string(httplib.ADMIN) {
+		platform.Error(w, http.StatusForbidden, "admin access required")
+		return
+	}
+
+	// Get flag ID from URL path
+	flagIDStr := chi.URLParam(r, "flag_id")
+	if flagIDStr == "" {
+		platform.Error(w, http.StatusBadRequest, "flag ID is required")
+		return
+	}
+
+	flagID, err := strconv.ParseInt(flagIDStr, 10, 64)
+	if err != nil {
+		platform.Error(w, http.StatusBadRequest, "invalid flag ID")
+		return
+	}
+
+	// Delete the flag
+	err = h.S.DeleteFlagListing(r.Context(), flagID)
+	if err != nil {
+		if err.Error() == "flag not found" {
+			platform.Error(w, http.StatusNotFound, "flag not found")
+			return
+		}
+		log.Printf("Error deleting flagged listing: %v", err)
+		platform.Error(w, http.StatusInternalServerError, "failed to delete flagged listing")
+		return
+	}
+
+	platform.JSON(w, http.StatusOK, map[string]string{"status": "deleted", "message": "Flagged listing deleted successfully"})
+}
+
+// HasUserFlaggedListingHandler checks if the current user has already flagged a listing
+func (h *Handlers) HasUserFlaggedListingHandler(w http.ResponseWriter, r *http.Request) {
+	// Validate user is authenticated
+	userID, err := common.ValidateUserAndRoleAuth(w, r)
+	if err != nil {
+		return
+	}
+
+	// Get listing ID from URL path
+	listingIDStr := chi.URLParam(r, "id")
+	if listingIDStr == "" {
+		platform.Error(w, http.StatusBadRequest, "listing ID is required")
+		return
+	}
+
+	listingID, err := strconv.ParseInt(listingIDStr, 10, 64)
+	if err != nil {
+		platform.Error(w, http.StatusBadRequest, "invalid listing ID")
+		return
+	}
+
+	// Check if user has flagged this listing
+	hasFlagged, err := h.S.HasUserFlaggedListing(r.Context(), listingID, userID)
+	if err != nil {
+		log.Printf("Error checking if user flagged listing: %v", err)
+		platform.Error(w, http.StatusInternalServerError, "failed to check flag status")
+		return
+	}
+
+	platform.JSON(w, http.StatusOK, map[string]bool{"has_flagged": hasFlagged})
 }

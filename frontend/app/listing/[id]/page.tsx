@@ -37,6 +37,8 @@ import {
   Shield,
   AlertCircle,
   Edit,
+  Trash2,
+  Loader2,
 } from "lucide-react"
 import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
@@ -59,6 +61,9 @@ export default function ListingDetailPage() {
   const [flagReason, setFlagReason] = useState<FlagReason | "">("")
   const [flagDetails, setFlagDetails] = useState("")
   const [flagging, setFlagging] = useState(false)
+  const [hasFlagged, setHasFlagged] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const { toast } = useToast()
 
   const listingId = params?.id ? parseInt(params.id as string, 10) : null
@@ -103,6 +108,38 @@ export default function ListingDetailPage() {
 
     fetchListing()
   }, [isHydrated, isAuthenticated, token, refreshToken, listingId, router])
+
+  // Check if user has already flagged this listing
+  useEffect(() => {
+    if (!isHydrated || !isAuthenticated || !token || !refreshToken || !listingId || isNaN(listingId) || !user) {
+      return
+    }
+
+    const checkIfFlagged = async () => {
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_ORCHESTRATOR_URL || "http://localhost:8080"}/api/listings/flag/${listingId}/check`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          },
+        )
+
+        if (response.ok) {
+          const data = await response.json()
+          setHasFlagged(data.has_flagged || false)
+        }
+      } catch (err) {
+        console.error("Error checking flag status:", err)
+        // Don't show error to user, just assume not flagged
+      }
+    }
+
+    checkIfFlagged()
+  }, [isHydrated, isAuthenticated, token, refreshToken, listingId, user])
 
   // Use placeholder images (media URLs not in response yet)
   const images = listing ? ["/placeholder.svg"] : []
@@ -160,6 +197,7 @@ export default function ListingDetailPage() {
       setFlagDialogOpen(false)
       setFlagReason("")
       setFlagDetails("")
+      setHasFlagged(true) // Update state to reflect that user has flagged
       // Refresh the listing to show updated status
       if (listingId && token && refreshToken) {
         const updatedListing = await orchestratorApi.getListingById(token, refreshToken, listingId)
@@ -168,13 +206,58 @@ export default function ListingDetailPage() {
     } catch (err) {
       console.error("Error flagging listing:", err)
       const errorMessage = err instanceof Error ? err.message : "Failed to flag listing"
+      // Check if it's a duplicate flag error
+      if (errorMessage.includes("already flagged") || errorMessage.includes("Already flagged")) {
+        setHasFlagged(true)
+        toast({
+          title: "Already Flagged",
+          description: "You have already flagged this listing.",
+          variant: "default",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: errorMessage,
+          variant: "destructive",
+        })
+      }
+    } finally {
+      setFlagging(false)
+    }
+  }
+
+  const handleDeleteListing = async () => {
+    if (!listingId || !token || !refreshToken) {
+      toast({
+        title: "Error",
+        description: "Authentication required",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setDeleting(true)
+      await orchestratorApi.deleteListing(token, refreshToken, listingId, true) // Soft delete by default
+
+      toast({
+        title: "Listing Deleted",
+        description: "The listing has been successfully deleted.",
+      })
+
+      // Navigate to profile page after deletion
+      router.push("/profile")
+    } catch (err) {
+      console.error("Error deleting listing:", err)
+      const errorMessage = err instanceof Error ? err.message : "Failed to delete listing"
       toast({
         title: "Error",
         description: errorMessage,
         variant: "destructive",
       })
     } finally {
-      setFlagging(false)
+      setDeleting(false)
+      setDeleteDialogOpen(false)
     }
   }
 
@@ -409,6 +492,53 @@ export default function ListingDetailPage() {
                         <Share2 className="h-5 w-5" />
                       </Button>
                     </div>
+                    {canEdit && (
+                      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                        <DialogTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className="w-full h-12 text-destructive hover:text-destructive hover:bg-destructive/10 hover:border-destructive magnetic-button bg-transparent"
+                          >
+                            <Trash2 className="mr-2 h-5 w-5" />
+                            Delete Listing
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[500px]">
+                          <DialogHeader>
+                            <DialogTitle>Delete Listing</DialogTitle>
+                            <DialogDescription>
+                              Are you sure you want to delete this listing? This action cannot be undone.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <DialogFooter>
+                            <Button
+                              variant="outline"
+                              onClick={() => setDeleteDialogOpen(false)}
+                              disabled={deleting}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              onClick={handleDeleteListing}
+                              disabled={deleting}
+                            >
+                              {deleting ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Deleting...
+                                </>
+                              ) : (
+                                <>
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete Listing
+                                </>
+                              )}
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -446,16 +576,19 @@ export default function ListingDetailPage() {
                   <Button
                     variant="outline"
                     className="w-full h-12 text-muted-foreground hover:text-destructive hover:border-destructive magnetic-button bg-transparent"
+                    disabled={hasFlagged}
                   >
                     <Flag className="mr-2 h-5 w-5" />
-                    Report this listing
+                    {hasFlagged ? "Already Reported" : "Report this listing"}
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[500px]">
                   <DialogHeader>
                     <DialogTitle>Report Listing</DialogTitle>
                     <DialogDescription>
-                      Help us keep our marketplace safe by reporting listings that violate our policies.
+                      {hasFlagged
+                        ? "You have already reported this listing. Our team will review it shortly."
+                        : "Help us keep our marketplace safe by reporting listings that violate our policies."}
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
@@ -499,11 +632,16 @@ export default function ListingDetailPage() {
                     >
                       Cancel
                     </Button>
-                    <Button onClick={handleFlagListing} disabled={flagging || !flagReason}>
+                    <Button onClick={handleFlagListing} disabled={flagging || !flagReason || hasFlagged}>
                       {flagging ? (
                         <>
                           <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                           Reporting...
+                        </>
+                      ) : hasFlagged ? (
+                        <>
+                          <Flag className="mr-2 h-4 w-4" />
+                          Already Reported
                         </>
                       ) : (
                         <>

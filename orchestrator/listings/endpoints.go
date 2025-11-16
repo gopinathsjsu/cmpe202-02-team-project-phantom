@@ -531,6 +531,14 @@ func (e *Endpoints) FlagListingHandler(w http.ResponseWriter, r *http.Request) {
 	// Call service (context should have userID and role from middleware)
 	response, err := e.service.FlagListing(r.Context(), req)
 	if err != nil {
+		// Check if error is due to duplicate flag
+		if err.Error() == "user has already flagged this listing" || err.Error() == "you have already flagged this listing" {
+			httplib.WriteJSON(w, http.StatusConflict, ErrorResponse{
+				Error:   "Already flagged",
+				Message: "You have already flagged this listing",
+			})
+			return
+		}
 		httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "Failed to flag listing",
 			Message: err.Error(),
@@ -539,6 +547,145 @@ func (e *Endpoints) FlagListingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httplib.WriteJSON(w, http.StatusCreated, response)
+}
+
+// HasUserFlaggedListingHandler checks if the current user has already flagged a listing
+func (e *Endpoints) HasUserFlaggedListingHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract ID from URL path using PathValue (Go 1.22+)
+	listingIDStr := r.PathValue("id")
+	if listingIDStr == "" {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request",
+			Message: "Listing ID is required",
+		})
+		return
+	}
+
+	listingID, err := strconv.ParseInt(listingIDStr, 10, 64)
+	if err != nil {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request",
+			Message: "Invalid listing ID format",
+		})
+		return
+	}
+
+	// Call service
+	hasFlagged, err := e.service.HasUserFlaggedListing(r.Context(), listingID)
+	if err != nil {
+		httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "Failed to check flag status",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	httplib.WriteJSON(w, http.StatusOK, map[string]bool{"has_flagged": hasFlagged})
+}
+
+func (e *Endpoints) UpdateFlagListingHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract ID from URL path using PathValue (Go 1.22+)
+	flagIDStr := r.PathValue("flag_id")
+	if flagIDStr == "" {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request",
+			Message: "Flag ID is required",
+		})
+		return
+	}
+
+	flagID, err := strconv.ParseInt(flagIDStr, 10, 64)
+	if err != nil {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request",
+			Message: "Invalid flag ID format",
+		})
+		return
+	}
+
+	var updateReq struct {
+		Status          FlagStatus `json:"status"`
+		ResolutionNotes *string    `json:"resolution_notes,omitempty"`
+	}
+
+	// Decode request body
+	if err := json.NewDecoder(r.Body).Decode(&updateReq); err != nil {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request body",
+			Message: "Failed to decode request body",
+		})
+		return
+	}
+
+	req := UpdateFlagListingRequest{
+		FlagID:          flagID,
+		Status:          updateReq.Status,
+		ResolutionNotes: updateReq.ResolutionNotes,
+	}
+
+	// Call service
+	response, err := e.service.UpdateFlagListing(r.Context(), req)
+	if err != nil {
+		httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "Failed to update flag listing",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	httplib.WriteJSON(w, http.StatusOK, response.FlaggedListing)
+}
+
+// DeleteFlagListingHandler handles deleting a flagged listing (admin only)
+func (e *Endpoints) DeleteFlagListingHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract ID from URL path using PathValue (Go 1.22+)
+	flagIDStr := r.PathValue("flag_id")
+	if flagIDStr == "" {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request",
+			Message: "Flag ID is required",
+		})
+		return
+	}
+
+	flagID, err := strconv.ParseInt(flagIDStr, 10, 64)
+	if err != nil {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request",
+			Message: "Invalid flag ID format",
+		})
+		return
+	}
+
+	req := DeleteFlagListingRequest{FlagID: flagID}
+
+	// Call service
+	response, err := e.service.DeleteFlagListing(r.Context(), req)
+	if err != nil {
+		// Check if error is due to admin access requirement
+		if err.Error() == "admin access required" {
+			httplib.WriteJSON(w, http.StatusForbidden, ErrorResponse{
+				Error:   "Forbidden",
+				Message: "Admin access required",
+			})
+			return
+		}
+		// Check if flag not found
+		if err.Error() == "flag not found" {
+			httplib.WriteJSON(w, http.StatusNotFound, ErrorResponse{
+				Error:   "Not found",
+				Message: "Flag not found",
+			})
+			return
+		}
+		httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "Failed to delete flagged listing",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	httplib.WriteJSON(w, http.StatusOK, response)
 }
 
 // adminOnlyMiddleware checks if the user has admin role
@@ -603,10 +750,13 @@ func (e *Endpoints) RegisterRoutes(mux *http.ServeMux, dbPool *pgxpool.Pool) {
 		httplib.RoleInjectionMiddleWare(dbPool)(http.HandlerFunc(e.UploadMediaHandler)),
 	))
 	mux.Handle("POST /api/listings/add-media-url/{id}", protected(http.HandlerFunc(e.AddMediaURLHandler)))
+	mux.Handle("GET /api/listings/flag/{id}/check", protected(http.HandlerFunc(e.HasUserFlaggedListingHandler)))
 	mux.Handle("POST /api/listings/flag/{id}", protected(http.HandlerFunc(e.FlagListingHandler)))
 
 	// Admin-only routes
 	mux.Handle("GET /api/listings/flagged", adminProtected(http.HandlerFunc(e.GetFlaggedListingsHandler)))
+	mux.Handle("PATCH /api/listings/flag/{flag_id}", adminProtected(http.HandlerFunc(e.UpdateFlagListingHandler)))
+	mux.Handle("DELETE /api/listings/flag/{flag_id}", adminProtected(http.HandlerFunc(e.DeleteFlagListingHandler)))
 	mux.Handle("GET /api/listings/by-user-id", adminProtected(http.HandlerFunc(e.GetListingsByUserIDHandler)))
 }
 
