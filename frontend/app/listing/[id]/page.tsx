@@ -61,6 +61,7 @@ export default function ListingDetailPage() {
   const [flagReason, setFlagReason] = useState<FlagReason | "">("")
   const [flagDetails, setFlagDetails] = useState("")
   const [flagging, setFlagging] = useState(false)
+  const [hasFlagged, setHasFlagged] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const { toast } = useToast()
@@ -107,6 +108,38 @@ export default function ListingDetailPage() {
 
     fetchListing()
   }, [isHydrated, isAuthenticated, token, refreshToken, listingId, router])
+
+  // Check if user has already flagged this listing
+  useEffect(() => {
+    if (!isHydrated || !isAuthenticated || !token || !refreshToken || !listingId || isNaN(listingId) || !user) {
+      return
+    }
+
+    const checkIfFlagged = async () => {
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_ORCHESTRATOR_URL || "http://localhost:8080"}/api/listings/flag/${listingId}/check`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          },
+        )
+
+        if (response.ok) {
+          const data = await response.json()
+          setHasFlagged(data.has_flagged || false)
+        }
+      } catch (err) {
+        console.error("Error checking flag status:", err)
+        // Don't show error to user, just assume not flagged
+      }
+    }
+
+    checkIfFlagged()
+  }, [isHydrated, isAuthenticated, token, refreshToken, listingId, user])
 
   // Use placeholder images (media URLs not in response yet)
   const images = listing ? ["/placeholder.svg"] : []
@@ -164,6 +197,7 @@ export default function ListingDetailPage() {
       setFlagDialogOpen(false)
       setFlagReason("")
       setFlagDetails("")
+      setHasFlagged(true) // Update state to reflect that user has flagged
       // Refresh the listing to show updated status
       if (listingId && token && refreshToken) {
         const updatedListing = await orchestratorApi.getListingById(token, refreshToken, listingId)
@@ -172,11 +206,21 @@ export default function ListingDetailPage() {
     } catch (err) {
       console.error("Error flagging listing:", err)
       const errorMessage = err instanceof Error ? err.message : "Failed to flag listing"
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      })
+      // Check if it's a duplicate flag error
+      if (errorMessage.includes("already flagged") || errorMessage.includes("Already flagged")) {
+        setHasFlagged(true)
+        toast({
+          title: "Already Flagged",
+          description: "You have already flagged this listing.",
+          variant: "default",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: errorMessage,
+          variant: "destructive",
+        })
+      }
     } finally {
       setFlagging(false)
     }
@@ -532,16 +576,19 @@ export default function ListingDetailPage() {
                   <Button
                     variant="outline"
                     className="w-full h-12 text-muted-foreground hover:text-destructive hover:border-destructive magnetic-button bg-transparent"
+                    disabled={hasFlagged}
                   >
                     <Flag className="mr-2 h-5 w-5" />
-                    Report this listing
+                    {hasFlagged ? "Already Reported" : "Report this listing"}
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[500px]">
                   <DialogHeader>
                     <DialogTitle>Report Listing</DialogTitle>
                     <DialogDescription>
-                      Help us keep our marketplace safe by reporting listings that violate our policies.
+                      {hasFlagged
+                        ? "You have already reported this listing. Our team will review it shortly."
+                        : "Help us keep our marketplace safe by reporting listings that violate our policies."}
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
@@ -585,11 +632,16 @@ export default function ListingDetailPage() {
                     >
                       Cancel
                     </Button>
-                    <Button onClick={handleFlagListing} disabled={flagging || !flagReason}>
+                    <Button onClick={handleFlagListing} disabled={flagging || !flagReason || hasFlagged}>
                       {flagging ? (
                         <>
                           <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                           Reporting...
+                        </>
+                      ) : hasFlagged ? (
+                        <>
+                          <Flag className="mr-2 h-4 w-4" />
+                          Already Reported
                         </>
                       ) : (
                         <>

@@ -524,6 +524,19 @@ func (s *Store) FlagListing(ctx context.Context, listingID int64, reporterUserID
 		return models.FlaggedListing{}, fmt.Errorf("invalid reporter user ID: %w", err)
 	}
 
+	// Check if user has already flagged this listing
+	var existingFlagID int64
+	err = s.P.QueryRow(ctx, `SELECT id FROM flagged_listings WHERE listing_id=$1 AND reporter_user_id=$2`, listingID, reporterUUID).Scan(&existingFlagID)
+	if err == nil {
+		// User has already flagged this listing
+		return models.FlaggedListing{}, fmt.Errorf("user has already flagged this listing")
+	}
+	if err != pgx.ErrNoRows {
+		// Some other database error occurred
+		return models.FlaggedListing{}, fmt.Errorf("failed to check existing flags: %w", err)
+	}
+	// err == pgx.ErrNoRows means no existing flag, which is what we want
+
 	// Insert the flag into flagged_listings table
 	// Status defaults to 'OPEN' as per database schema
 	const insertFlagQuery = `
@@ -588,4 +601,22 @@ func (s *Store) DeleteFlagListing(ctx context.Context, flagID int64) error {
 	}
 
 	return nil
+}
+
+// HasUserFlaggedListing checks if a user has already flagged a specific listing
+func (s *Store) HasUserFlaggedListing(ctx context.Context, listingID int64, userID string) (bool, error) {
+	reporterUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return false, fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	var flagID int64
+	err = s.P.QueryRow(ctx, `SELECT id FROM flagged_listings WHERE listing_id=$1 AND reporter_user_id=$2`, listingID, reporterUUID).Scan(&flagID)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check if user flagged listing: %w", err)
+	}
+	return true, nil
 }

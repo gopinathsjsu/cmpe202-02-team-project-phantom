@@ -38,6 +38,7 @@ type Service interface {
 	ChatSearch(ctx context.Context, req ChatSearchRequest) (*ChatSearchResponse, error)
 	FetchFlaggedListings(ctx context.Context, req FetchFlaggedListingsRequest) (*FetchFlaggedListingsResponse, error)
 	FlagListing(ctx context.Context, req FlagListingRequest) (*FlagListingResponse, error)
+	HasUserFlaggedListing(ctx context.Context, listingID int64) (bool, error)
 	UpdateFlagListing(ctx context.Context, req UpdateFlagListingRequest) (*UpdateFlagListingResponse, error)
 	DeleteFlagListing(ctx context.Context, req DeleteFlagListingRequest) (*DeleteFlagListingResponse, error)
 }
@@ -652,6 +653,17 @@ func (s *svc) FlagListing(ctx context.Context, req FlagListingRequest) (*FlagLis
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
+		if resp.StatusCode == http.StatusConflict {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			// Try to parse error message
+			var errorResp struct {
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(bodyBytes, &errorResp); err == nil && errorResp.Message != "" {
+				return nil, fmt.Errorf(errorResp.Message)
+			}
+			return nil, fmt.Errorf("user has already flagged this listing")
+		}
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -664,6 +676,43 @@ func (s *svc) FlagListing(ctx context.Context, req FlagListingRequest) (*FlagLis
 	return &FlagListingResponse{
 		FlaggedListing: flaggedListing,
 	}, nil
+}
+
+func (s *svc) HasUserFlaggedListing(ctx context.Context, listingID int64) (bool, error) {
+	// Extract and validate user authentication
+	userID, roleID, err := s.extractUserAndRole(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	fullURL := fmt.Sprintf("%s/listings/flag/%d/check", s.config.URL, listingID)
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("X-User-ID", userID)
+	httpReq.Header.Set("X-Role-ID", roleID)
+
+	resp, err := s.config.Client.Do(httpReq)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result struct {
+		HasFlagged bool `json:"has_flagged"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return result.HasFlagged, nil
 }
 
 func (s *svc) UpdateFlagListing(ctx context.Context, req UpdateFlagListingRequest) (*UpdateFlagListingResponse, error) {

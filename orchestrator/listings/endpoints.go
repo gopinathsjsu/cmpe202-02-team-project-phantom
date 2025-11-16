@@ -531,6 +531,14 @@ func (e *Endpoints) FlagListingHandler(w http.ResponseWriter, r *http.Request) {
 	// Call service (context should have userID and role from middleware)
 	response, err := e.service.FlagListing(r.Context(), req)
 	if err != nil {
+		// Check if error is due to duplicate flag
+		if err.Error() == "user has already flagged this listing" || err.Error() == "you have already flagged this listing" {
+			httplib.WriteJSON(w, http.StatusConflict, ErrorResponse{
+				Error:   "Already flagged",
+				Message: "You have already flagged this listing",
+			})
+			return
+		}
 		httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error:   "Failed to flag listing",
 			Message: err.Error(),
@@ -539,6 +547,40 @@ func (e *Endpoints) FlagListingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httplib.WriteJSON(w, http.StatusCreated, response)
+}
+
+// HasUserFlaggedListingHandler checks if the current user has already flagged a listing
+func (e *Endpoints) HasUserFlaggedListingHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract ID from URL path using PathValue (Go 1.22+)
+	listingIDStr := r.PathValue("id")
+	if listingIDStr == "" {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request",
+			Message: "Listing ID is required",
+		})
+		return
+	}
+
+	listingID, err := strconv.ParseInt(listingIDStr, 10, 64)
+	if err != nil {
+		httplib.WriteJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error:   "Invalid request",
+			Message: "Invalid listing ID format",
+		})
+		return
+	}
+
+	// Call service
+	hasFlagged, err := e.service.HasUserFlaggedListing(r.Context(), listingID)
+	if err != nil {
+		httplib.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
+			Error:   "Failed to check flag status",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	httplib.WriteJSON(w, http.StatusOK, map[string]bool{"has_flagged": hasFlagged})
 }
 
 func (e *Endpoints) UpdateFlagListingHandler(w http.ResponseWriter, r *http.Request) {
@@ -708,6 +750,7 @@ func (e *Endpoints) RegisterRoutes(mux *http.ServeMux, dbPool *pgxpool.Pool) {
 		httplib.RoleInjectionMiddleWare(dbPool)(http.HandlerFunc(e.UploadMediaHandler)),
 	))
 	mux.Handle("POST /api/listings/add-media-url/{id}", protected(http.HandlerFunc(e.AddMediaURLHandler)))
+	mux.Handle("GET /api/listings/flag/{id}/check", protected(http.HandlerFunc(e.HasUserFlaggedListingHandler)))
 	mux.Handle("POST /api/listings/flag/{id}", protected(http.HandlerFunc(e.FlagListingHandler)))
 
 	// Admin-only routes
