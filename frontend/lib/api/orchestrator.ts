@@ -20,6 +20,7 @@ import type {
   DeleteFlagListingResponse,
   UpdateUserRequest,
   UpdateUserResponse,
+  ListingMedia,
 } from "./types"
 import { isTokenExpired } from "@/lib/utils/jwt"
 
@@ -1138,6 +1139,156 @@ export const orchestratorApi = {
         const newToken = await getValidToken(refreshToken)
         return fetch(url, {
           method: "POST",
+          headers: {
+            Authorization: `Bearer ${newToken || validToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        })
+      },
+    )
+  },
+
+  /**
+   * Get media URLs for a listing
+   * @param token - Access token
+   * @param refreshToken - Refresh token
+   * @param listingId - Listing ID
+   * @returns Array of media URLs
+   */
+  async getListingMedia(
+    token: string,
+    refreshToken: string | null,
+    listingId: number,
+  ): Promise<ListingMedia[]> {
+    const validToken = (await getValidToken(refreshToken)) || token
+
+    const url = `${ORCHESTRATOR_URL}/api/listings/${listingId}/media`
+
+    const makeRequest = () =>
+      fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          "Content-Type": "application/json",
+        },
+      })
+
+    const response = await makeRequest()
+
+    return handleResponse<ListingMedia[]>(
+      response,
+      refreshToken,
+      tokenUpdateCallback || undefined,
+      async () => {
+        const newToken = await getValidToken(refreshToken)
+        return fetch(url, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${newToken || validToken}`,
+            "Content-Type": "application/json",
+          },
+        })
+      },
+    )
+  },
+
+  /**
+   * Update a media URL for a listing
+   * @param token - Access token
+   * @param refreshToken - Refresh token
+   * @param listingId - Listing ID
+   * @param mediaId - Media ID
+   * @param newUrl - New media URL
+   * @returns Success response
+   */
+  async updateListingMedia(
+    token: string,
+    refreshToken: string | null,
+    listingId: number,
+    mediaId: number,
+    newUrl: string,
+  ): Promise<{ message: string }> {
+    const validToken = (await getValidToken(refreshToken)) || token
+
+    const url = `${ORCHESTRATOR_URL}/api/listings/${listingId}/media/${mediaId}`
+
+    const body = {
+      new_url: newUrl,
+    }
+
+    const makeRequest = () =>
+      fetch(url, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      })
+
+    const response = await makeRequest()
+
+    return handleResponse<{ message: string }>(
+      response,
+      refreshToken,
+      tokenUpdateCallback || undefined,
+      async () => {
+        const newToken = await getValidToken(refreshToken)
+        return fetch(url, {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${newToken || validToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        })
+      },
+    )
+  },
+
+  /**
+   * Delete a media URL for a listing
+   * @param token - Access token
+   * @param refreshToken - Refresh token
+   * @param listingId - Listing ID
+   * @param mediaUrl - Media URL to delete
+   * @returns Success response
+   */
+  async deleteListingMedia(
+    token: string,
+    refreshToken: string | null,
+    listingId: number,
+    mediaUrl: string,
+  ): Promise<{ message: string }> {
+    const validToken = (await getValidToken(refreshToken)) || token
+
+    const url = `${ORCHESTRATOR_URL}/api/listings/${listingId}/media`
+
+    const body = {
+      media_url: mediaUrl,
+    }
+
+    const makeRequest = () =>
+      fetch(url, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      })
+
+    const response = await makeRequest()
+
+    return handleResponse<{ message: string }>(
+      response,
+      refreshToken,
+      tokenUpdateCallback || undefined,
+      async () => {
+        const newToken = await getValidToken(refreshToken)
+        return fetch(url, {
+          method: "DELETE",
           headers: {
             Authorization: `Bearer ${newToken || validToken}`,
             "Content-Type": "application/json",
