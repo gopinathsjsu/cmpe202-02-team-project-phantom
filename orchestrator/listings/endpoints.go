@@ -910,24 +910,26 @@ func (e *Endpoints) RegisterRoutes(mux *http.ServeMux, dbPool *pgxpool.Pool) {
 	}
 
 	// Protected routes (require auth + role injection)
+	// Specific routes must come before parameterized routes to avoid conflicts
 	mux.Handle("GET /api/listings/", protected(http.HandlerFunc(e.GetAllListingsHandler)))
-	mux.Handle("GET /api/listings/{id}", protected(http.HandlerFunc(e.GetListingByIDHandler)))
 	mux.Handle("POST /api/listings/chatsearch", protected(http.HandlerFunc(e.ChatSearchHandler)))
 	mux.Handle("POST /api/listings/create", protected(http.HandlerFunc(e.CreateListingHandler)))
-	mux.Handle("PATCH /api/listings/update/{id}", protected(http.HandlerFunc(e.UpdateListingHandler)))
-	mux.Handle("DELETE /api/listings/delete/{id}", httplib.AuthMiddleWare(
-		httplib.RoleInjectionMiddleWare(dbPool)(http.HandlerFunc(e.DeleteListingHandler)),
-	))
 	mux.Handle("GET /api/listings/user-lists/", protected(http.HandlerFunc(e.GetUserListingsHandler)))
 	mux.Handle("POST /api/listings/upload", httplib.AuthMiddleWare(
 		httplib.RoleInjectionMiddleWare(dbPool)(http.HandlerFunc(e.UploadMediaHandler)),
 	))
+	mux.Handle("GET /api/listings/flag/{id}/check", protected(http.HandlerFunc(e.HasUserFlaggedListingHandler)))
+	mux.Handle("POST /api/listings/flag/{id}", protected(http.HandlerFunc(e.FlagListingHandler)))
 	mux.Handle("POST /api/listings/add-media-url/{id}", protected(http.HandlerFunc(e.AddMediaURLHandler)))
+	mux.Handle("PATCH /api/listings/update/{id}", protected(http.HandlerFunc(e.UpdateListingHandler)))
+	mux.Handle("DELETE /api/listings/delete/{id}", httplib.AuthMiddleWare(
+		httplib.RoleInjectionMiddleWare(dbPool)(http.HandlerFunc(e.DeleteListingHandler)),
+	))
+	// Parameterized routes - must come after all specific routes
+	mux.Handle("GET /api/listings/{id}", protected(http.HandlerFunc(e.GetListingByIDHandler)))
 	mux.Handle("GET /api/listings/{id}/media", protected(http.HandlerFunc(e.GetMediaURLsHandler)))
 	mux.Handle("PATCH /api/listings/{id}/media/{media_id}", protected(http.HandlerFunc(e.UpdateMediaURLHandler)))
 	mux.Handle("DELETE /api/listings/{id}/media", protected(http.HandlerFunc(e.DeleteMediaURLHandler)))
-	mux.Handle("GET /api/listings/flag/{id}/check", protected(http.HandlerFunc(e.HasUserFlaggedListingHandler)))
-	mux.Handle("POST /api/listings/flag/{id}", protected(http.HandlerFunc(e.FlagListingHandler)))
 
 	// Admin-only routes
 	mux.Handle("GET /api/listings/flagged", adminProtected(http.HandlerFunc(e.GetFlaggedListingsHandler)))
