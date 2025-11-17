@@ -55,7 +55,7 @@ export function ListingCard({ listing, token, refreshToken, index }: ListingCard
     try {
       setLoadingMedia(true)
       const media = await orchestratorApi.getListingMedia(token, refreshToken, listing.id)
-      if (media.length > 0) {
+      if (media && Array.isArray(media) && media.length > 0) {
         setMediaUrl(media[0].media_url)
         setCachedMedia(listing.id, media)
       }

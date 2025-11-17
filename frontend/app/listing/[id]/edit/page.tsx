@@ -124,8 +124,12 @@ export default function EditListingPage() {
       try {
         setLoadingMedia(true)
         const media = await orchestratorApi.getListingMedia(token, refreshToken, listingId)
-        setMediaUrls(media)
-        setCachedMedia(listingId, media)
+        if (media && Array.isArray(media)) {
+          setMediaUrls(media)
+          setCachedMedia(listingId, media)
+        } else {
+          setMediaUrls([])
+        }
       } catch (err) {
         console.error("Error fetching media URLs:", err)
         setMediaUrls([])
