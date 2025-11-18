@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/hooks/use-auth"
 import { orchestratorApi } from "@/lib/api/orchestrator"
 import type { Listing, User } from "@/lib/api/types"
+import { getCachedMedia, setCachedMedia } from "@/lib/utils/media-cache"
 import {
   formatPrice,
   formatDate,
@@ -54,7 +55,15 @@ export default function ProfilePage() {
   const [editEmail, setEditEmail] = useState("")
   const [editContactEmail, setEditContactEmail] = useState("")
   const [updating, setUpdating] = useState(false)
+  const [listingMediaUrls, setListingMediaUrls] = useState<Map<number, string>>(new Map())
+  const [loadingMedia, setLoadingMedia] = useState<Set<number>>(new Set())
+  const loadingMediaRef = useRef<Set<number>>(new Set())
   const { toast } = useToast()
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    loadingMediaRef.current = loadingMedia
+  }, [loadingMedia])
 
   // Get refresh token from localStorage
   useEffect(() => {
@@ -171,6 +180,68 @@ export default function ProfilePage() {
   // Format join date
   const joinDate = user?.created_at || authUser?.created_at
   const formattedJoinDate = joinDate ? formatDate(joinDate) : ""
+
+  // Fetch media for a listing
+  const fetchListingMedia = useCallback(
+    async (listingId: number) => {
+      if (!token || !refreshToken || loadingMediaRef.current.has(listingId)) {
+        return
+      }
+
+      // Check cache first
+      const cached = getCachedMedia(listingId)
+      if (cached && cached.length > 0) {
+        setListingMediaUrls((prev) => {
+          const newMap = new Map(prev)
+          newMap.set(listingId, cached[0].media_url)
+          return newMap
+        })
+        return
+      }
+
+      try {
+        setLoadingMedia((prev) => new Set(prev).add(listingId))
+        const media = await orchestratorApi.getListingMedia(token, refreshToken, listingId)
+        if (media && Array.isArray(media) && media.length > 0) {
+          setListingMediaUrls((prev) => {
+            const newMap = new Map(prev)
+            newMap.set(listingId, media[0].media_url)
+            return newMap
+          })
+          setCachedMedia(listingId, media)
+        }
+      } catch (err) {
+        console.error(`Error fetching media for listing ${listingId}:`, err)
+        // Use placeholder on error (mediaUrl will remain null)
+      } finally {
+        setLoadingMedia((prev) => {
+          const newSet = new Set(prev)
+          newSet.delete(listingId)
+          return newSet
+        })
+      }
+    },
+    [token, refreshToken],
+  )
+
+  // Fetch media for listings when they're loaded
+  useEffect(() => {
+    if (!token || !refreshToken || listings.length === 0) {
+      return
+    }
+
+    // Fetch media for all listings (can be optimized with IntersectionObserver if needed)
+    listings.forEach((listing) => {
+      // Check if we already have media for this listing
+      const hasMedia = listingMediaUrls.has(listing.id)
+      const isCurrentlyLoading = loadingMediaRef.current.has(listing.id)
+      
+      if (!hasMedia && !isCurrentlyLoading) {
+        fetchListingMedia(listing.id)
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listings, token, refreshToken, fetchListingMedia])
 
   // Handle edit dialog open
   const handleOpenEditDialog = () => {
@@ -429,14 +500,24 @@ export default function ProfilePage() {
                             >
                               <CardHeader className="p-0">
                                 <div className="relative aspect-square overflow-hidden bg-muted rounded-t-xl">
-                                  <img
-                                    src="/placeholder.svg"
-                                    alt={listing.title}
-                                    className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                  />
+                                  {loadingMedia.has(listing.id) ? (
+                                    <div className="flex items-center justify-center h-full">
+                                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                                    </div>
+                                  ) : (
+                                    <img
+                                      src={listingMediaUrls.get(listing.id) || "/placeholder.svg"}
+                                      alt={listing.title}
+                                      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                      onError={(e) => {
+                                        // Fallback to placeholder if image fails to load
+                                        ;(e.target as HTMLImageElement).src = "/placeholder.svg"
+                                      }}
+                                    />
+                                  )}
                                   <Badge
                                     className={`absolute right-3 top-3 ${
-                                      isSold ? "bg-green-500 text-white" : "bg-background/90 backdrop-blur-sm"
+                                      isSold ? "bg-green-500 text-white" : "bg-slate-900/90 text-white backdrop-blur-sm"
                                     }`}
                                   >
                                     {isSold ? "Sold" : mapCategoryToDisplay(listing.category)}
@@ -453,7 +534,7 @@ export default function ProfilePage() {
                                   <span className="text-2xl font-bold text-primary">
                                     {formatPrice(listing.price)}
                                   </span>
-                                  <Badge variant="secondary">
+                                  <Badge className="bg-slate-900 text-white font-medium">
                                     {mapStatusToDisplay(listing.status)}
                                   </Badge>
                                 </div>
