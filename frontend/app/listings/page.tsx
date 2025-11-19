@@ -315,8 +315,11 @@ export default function ListingsPage() {
           })
           setOffset(currentOffset + items.length)
 
-          // Update total count for display
-          setTotalCount((prev) => prev + items.length)
+          // Total count should remain the same (it's the total matching items in DB)
+          // Only update if response provides a count (should be same as initial)
+          if (response.count !== undefined) {
+            setTotalCount(response.count)
+          }
         } else {
           // Got empty response, no more items
           setHasMore(false)
@@ -798,9 +801,20 @@ export default function ListingsPage() {
             ) : (
               <>
                 <div className="mb-6 text-base text-muted-foreground scroll-reveal">
-                  <span className="font-semibold text-foreground">{listings.length}</span> item
-                  {listings.length !== 1 ? "s" : ""} loaded
-                  {hasMore && <span className="text-muted-foreground"> (scroll for more)</span>}
+                  {totalCount > 0 ? (
+                    <>
+                      Showing <span className="font-semibold text-foreground">{listings.length}</span> of{" "}
+                      <span className="font-semibold text-foreground">{totalCount}</span> item
+                      {totalCount !== 1 ? "s" : ""}
+                      {hasMore && <span className="text-muted-foreground"> (scroll for more)</span>}
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-semibold text-foreground">{listings.length}</span> item
+                      {listings.length !== 1 ? "s" : ""} loaded
+                      {hasMore && <span className="text-muted-foreground"> (scroll for more)</span>}
+                    </>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
