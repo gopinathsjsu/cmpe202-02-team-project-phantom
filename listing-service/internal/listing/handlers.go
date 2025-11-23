@@ -142,7 +142,11 @@ func (h *Handlers) DeleteHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) ChatSearchHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Query string `json:"query"`
+		Query               string `json:"query"`
+		ConversationHistory []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"conversation_history,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -154,9 +158,18 @@ func (h *Handlers) ChatSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Received search query: %s", req.Query)
+	log.Printf("Received search query: %s (with %d previous messages)", req.Query, len(req.ConversationHistory))
 
-	searchParams, err := h.AI.GetSearchParams(r.Context(), req.Query)
+	// Convert conversation history to the format expected by Gemini client
+	conversationHistory := make([]models.ChatMessage, 0, len(req.ConversationHistory))
+	for _, msg := range req.ConversationHistory {
+		conversationHistory = append(conversationHistory, models.ChatMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		})
+	}
+
+	searchParams, err := h.AI.GetSearchParams(r.Context(), req.Query, conversationHistory)
 	if err != nil {
 		log.Printf("ERROR getting search params from AI: %v", err)
 		http.Error(w, "Failed to understand query", http.StatusInternalServerError)

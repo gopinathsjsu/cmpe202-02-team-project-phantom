@@ -434,6 +434,11 @@ func (e *Endpoints) ChatSearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ensure conversation_history is not nil
+	if req.ConversationHistory == nil {
+		req.ConversationHistory = []ChatMessage{}
+	}
+
 	// Call service
 	response, err := e.service.ChatSearch(r.Context(), req)
 	if err != nil {

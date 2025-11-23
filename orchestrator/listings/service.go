@@ -525,9 +525,11 @@ func (s *svc) AddMediaURL(ctx context.Context, req AddMediaURLRequest) (*AddMedi
 
 func (s *svc) ChatSearch(ctx context.Context, req ChatSearchRequest) (*ChatSearchResponse, error) {
 	reqBody := struct {
-		Query string `json:"query"`
+		Query               string        `json:"query"`
+		ConversationHistory []ChatMessage `json:"conversation_history,omitempty"`
 	}{
-		Query: req.Query,
+		Query:               req.Query,
+		ConversationHistory: req.ConversationHistory,
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)

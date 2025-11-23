@@ -144,9 +144,16 @@ type AddMediaURLResponse struct {
 	Count   int    `json:"count"`
 }
 
+// ChatMessage represents a message in the conversation history
+type ChatMessage struct {
+	Role    string `json:"role"`    // "user" or "assistant"
+	Content string `json:"content"`
+}
+
 // ChatSearchRequest for AI-powered search
 type ChatSearchRequest struct {
-	Query string `json:"query"`
+	Query               string        `json:"query"`
+	ConversationHistory []ChatMessage `json:"conversation_history,omitempty"`
 }
 
 // ChatSearchResponse returns search results
