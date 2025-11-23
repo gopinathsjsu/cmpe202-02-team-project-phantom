@@ -38,14 +38,21 @@ export function AIChatbot({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
     if (!input.trim() || !token || !refreshToken) return
 
     const userMessage = input.trim()
-    setMessages([...messages, { role: "user", content: userMessage }])
+    const updatedMessages = [...messages, { role: "user" as const, content: userMessage }]
+    setMessages(updatedMessages)
     setInput("")
     setIsSearching(true)
 
     try {
       console.log("[v0] AI chatbot searching for:", userMessage)
       
-      const response = await orchestratorApi.chatSearch(token, refreshToken, userMessage)
+      // Send conversation history (excluding the initial assistant greeting)
+      const conversationHistory = updatedMessages.slice(1).map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }))
+      
+      const response = await orchestratorApi.chatSearch(token, refreshToken, userMessage, conversationHistory)
       
       console.log("[v0] AI chatbot full response:", response)
       console.log("[v0] AI chatbot listings:", response?.listings)

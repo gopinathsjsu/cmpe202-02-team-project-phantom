@@ -126,6 +126,11 @@ export interface DeleteFlagListingResponse {
   message: string
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant"
+  content: string
+}
+
 export interface ChatSearchResponse {
   listings: Listing[]
 }

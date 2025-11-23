@@ -21,7 +21,8 @@ import type {
   UpdateUserRequest,
   UpdateUserResponse,
   ListingMedia,
-  ChatSearchResponse, // Merged: Kept the new ChatSearchResponse import
+  ChatSearchResponse,
+  ChatMessage,
 } from "./types"
 import { isTokenExpired } from "@/lib/utils/jwt"
 
@@ -1336,18 +1337,23 @@ export const orchestratorApi = {
    * @param token - Access token
    * @param refreshToken - Refresh token
    * @param query - Search query
+   * @param conversationHistory - Optional conversation history for context
    * @returns Search results
    */
   async chatSearch(
     token: string,
     refreshToken: string | null,
     query: string,
+    conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>,
   ): Promise<ChatSearchResponse> { 
     const validToken = (await getValidToken(refreshToken)) || token
 
     const url = `${ORCHESTRATOR_URL}/api/listings/chatsearch`
 
-    const body = { query }
+    const body = { 
+      query,
+      conversation_history: conversationHistory || []
+    }
 
     const makeRequest = () =>
       fetch(url, {

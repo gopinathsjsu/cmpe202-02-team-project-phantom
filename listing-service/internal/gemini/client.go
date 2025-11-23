@@ -30,17 +30,43 @@ func NewClient() *Client {
 	}
 }
 
-func (c *Client) GetSearchParams(ctx context.Context, userQuery string) (*models.ListFilters, error) {
+func (c *Client) GetSearchParams(ctx context.Context, userQuery string, conversationHistory []models.ChatMessage) (*models.ListFilters, error) {
 	if c.apiKey == "" {
 		return nil, fmt.Errorf("GOOGLE_API_KEY environment variable not set")
 	}
 
-	prompt := getPrompt(userQuery) // Assumes getPrompt() function exists in this file
+	// Build conversation context from history
+	// Gemini API expects alternating user/model messages in the Contents array
+	contents := make([]models.Content, 0)
+	
+	// If we have conversation history, add it first
+	// The history should already be in the correct order (user, assistant, user, assistant, ...)
+	for _, msg := range conversationHistory {
+		contents = append(contents, models.Content{
+			Parts: []models.Part{{Text: msg.Content}},
+		})
+	}
+	
+	// Build the prompt for the current query
+	var currentUserMessage string
+	if len(conversationHistory) > 0 {
+		// With conversation history, we need to include system instructions
+		// and make the query context-aware
+		systemPrompt := getSystemPrompt()
+		currentUserMessage = fmt.Sprintf("%s\n\nBased on our conversation above, analyze the following user query and provide the JSON output immediately.\n\nUser query: \"%s\"", systemPrompt, userQuery)
+	} else {
+		// No history, combine system prompt with user query
+		systemPrompt := getSystemPrompt()
+		currentUserMessage = fmt.Sprintf("%s\n\nAnalyze the following user query and provide the JSON output immediately.\n\nUser query: \"%s\"", systemPrompt, userQuery)
+	}
+	
+	// Add the current user query as the next message in the conversation
+	contents = append(contents, models.Content{
+		Parts: []models.Part{{Text: currentUserMessage}},
+	})
 
 	apiReq := models.GeminiRequest{
-		Contents: []models.Content{
-			{Parts: []models.Part{{Text: prompt}}},
-		},
+		Contents: contents,
 	}
 
 	reqBody, err := json.Marshal(apiReq)
@@ -98,7 +124,7 @@ func (c *Client) GetSearchParams(ctx context.Context, userQuery string) (*models
 	return &searchParams, nil
 }
 
-func getPrompt(userQuery string) string {
+func getSystemPrompt() string {
 	return fmt.Sprintf(`You are an intelligent search assistant for a campus marketplace application.
 Your sole purpose is to analyze a user's query and expand it with synonyms to create a robust search.
 You must respond ONLY with a valid JSON object. Do not include markdown formatting like '\' '\' '\' json, greetings, or any other explanatory text.
@@ -125,10 +151,13 @@ User query: "something for my dorm room"
 Your JSON response:
 {"category": "essentials", "keywords": ["dorm", "room", "lamp", "desk", "chair", "microwave"]}
 
-Analyze the following user query and provide the JSON output immediately.
+When you have conversation history, use it to understand context and refine your search parameters. For example, if the user previously asked about "textbooks" and now asks "something cheaper", you should search for textbooks with a lower price range.`, CategoriesAsString())
+}
 
-User query: "%s"
-`, CategoriesAsString(), userQuery)
+func getPrompt(userQuery string) string {
+	return fmt.Sprintf(`Analyze the following user query and provide the JSON output immediately.
+
+User query: "%s"`, userQuery)
 }
 
 func parseInt(s string, def int) int {

@@ -22,3 +22,9 @@ type GeminiResponse struct {
 type Candidate struct {
 	Content Content `json:"content"`
 }
+
+// ChatMessage represents a message in the conversation history
+type ChatMessage struct {
+	Role    string `json:"role"`    // "user" or "assistant"
+	Content string `json:"content"`
+}
