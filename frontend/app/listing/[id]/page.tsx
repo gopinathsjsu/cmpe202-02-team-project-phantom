@@ -382,6 +382,68 @@ export default function ListingDetailPage() {
     }
   }
 
+  // Handle share listing
+  const handleShare = async () => {
+    if (!listing || !listingId) {
+      toast({
+        title: "Error",
+        description: "Unable to share listing. Please try again.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Construct the listing URL
+    const listingUrl = `${window.location.origin}/listing/${listingId}`
+    const shareTitle = listing.title
+    const shareText = listing.description 
+      ? `${listing.title} - ${listing.description.substring(0, 100)}${listing.description.length > 100 ? "..." : ""}`
+      : listing.title
+
+    // Check if Web Share API is supported
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url: listingUrl,
+        })
+        toast({
+          title: "Shared",
+          description: "Listing shared successfully!",
+        })
+      } catch (err) {
+        // User cancelled or error occurred
+        if (err instanceof Error && err.name !== "AbortError") {
+          console.error("Error sharing:", err)
+          toast({
+            title: "Error",
+            description: "Failed to share listing. Please try again.",
+            variant: "destructive",
+          })
+        }
+        // If user cancelled (AbortError), don't show error - just return silently
+        return
+      }
+    } else {
+      // Fallback to clipboard copy
+      try {
+        await navigator.clipboard.writeText(listingUrl)
+        toast({
+          title: "Link Copied",
+          description: "Listing link has been copied to your clipboard!",
+        })
+      } catch (err) {
+        console.error("Error copying to clipboard:", err)
+        toast({
+          title: "Error",
+          description: "Failed to copy link. Please try again.",
+          variant: "destructive",
+        })
+      }
+    }
+  }
+
   // Format date helper
   const formatDate = (dateString: string) => {
     try {
@@ -675,7 +737,13 @@ export default function ListingDetailPage() {
                           </>
                         )}
                       </Button>
-                      <Button variant="outline" size="icon" className="h-12 w-12 magnetic-button bg-transparent">
+                      <Button 
+                        variant="outline" 
+                        size="icon" 
+                        className="h-12 w-12 magnetic-button bg-transparent"
+                        onClick={handleShare}
+                        aria-label="Share listing"
+                      >
                         <Share2 className="h-5 w-5" />
                       </Button>
                     </div>
