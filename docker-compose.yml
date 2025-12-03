@@ -1,11 +1,7 @@
 services:
-  mongo:
-    image: mongo:7
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+  # Note: MongoDB and PostgreSQL are cloud-hosted (MongoDB Atlas and Neon)
+  # Services connect via DATABASE_URL, CHAT_MONGO_URI, and MONGO_URI environment variables
+  # No local database containers needed
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -29,10 +25,14 @@ services:
     env_file:
       - ./listing-service/.env
     environment:
-      # This will come from your .env and should point to Neon
+      # DATABASE_URL can be overridden from root .env
       DATABASE_URL: ${DATABASE_URL}
+      # LISTING_PORT is loaded from listing-service/.env via env_file (listing-service/.env has LISTING_PORT=8081)
     ports:
-      - "${LISTING_PORT}:${LISTING_PORT}"
+      # LISTING_PORT from root .env file (for docker-compose port mapping)
+      # Root .env should have LISTING_PORT=8081 (matches listing-service/.env)
+      # Falls back to default 8081 if not set
+      - "${LISTING_PORT:-8081}:${LISTING_PORT:-8081}"
     # No longer depends on db-seeder / local Postgres
 
 
@@ -44,15 +44,16 @@ services:
     env_file:
       - ./orchestrator/.env
     ports:
-      - "${ORCHESTRATOR_PORT}:${ORCHESTRATOR_PORT}"
+      # PORT from root .env file (for docker-compose port mapping)
+      # Root .env should have PORT=8080 (matches orchestrator/.env)
+      # Falls back to default 8080 if not set
+      - "${PORT:-8080}:${PORT:-8080}"
     environment:
-      # Use a single DATABASE_URL from .env (Neon)
-      DATABASE_URL: ${DATABASE_URL}
-      # Orchestrator expects PORT env var, map from ORCHESTRATOR_PORT
-      PORT: ${ORCHESTRATOR_PORT}
+      # DATABASE_URL is loaded from orchestrator/.env via env_file (don't override it)
+      # Override RabbitMQ URL to use Docker service name instead of localhost
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      LISTING_SERVICE_URL: http://listing-service:8081
     depends_on:
-      mongo:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -65,11 +66,16 @@ services:
     env_file:
       - ./events-server/.env
     environment:
-      # Server port - format should include colon prefix (e.g., ":8001")
-      # EVENTS_SERVER_PORT should be just the number (e.g., "8001")
-      PORT: ":${EVENTS_SERVER_PORT}"
+      # Override RabbitMQ and Redis URLs to use Docker service names instead of localhost
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      REDIS_ADDR: redis:6379
+      # Override orchestrator URL to use Docker service name
+      ORCH_BASE_URL: http://orchestrator:8080
     ports:
-      - "${EVENTS_SERVER_PORT}:${EVENTS_SERVER_PORT}"
+      # EVENTS_PORT from root .env file (for docker-compose port mapping)
+      # Root .env should have EVENTS_PORT=8001 (numeric part of PORT=:8001 in events-server/.env)
+      # Falls back to default 8001 if not set
+      - "${EVENTS_PORT:-8001}:${EVENTS_PORT:-8001}"
     depends_on:
       - redis
       - rabbitmq
@@ -88,29 +94,20 @@ services:
       dockerfile: ./chat-consumer/Dockerfile
     env_file:
       - ./chat-consumer/.env
+    environment:
+      # Override RabbitMQ and Redis URLs to use Docker service names instead of localhost
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      REDIS_ADDR: redis:6379
     depends_on:
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped      # typical for background jobs
 
-  # frontend:
-  #   build:
-  #     context: .
-  #     dockerfile: ./frontend/Dockerfile
-  #   container_name: frontend
-  #   ports:
-  #     - "${FRONTEND_PORT:-3000}:${FRONTEND_PORT:-3000}"
-  #   environment:
-  #     NODE_ENV: production
-  #     PORT: ${FRONTEND_PORT:-3000}
-  #   depends_on:
-  #     - orchestrator
-  #   healthcheck:
-  #     test: ["CMD", "sh", "-c", "wget -qO- http://localhost:$${PORT:-3000}/"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  # Frontend runs locally (not in Docker) and connects to backend services via localhost
+  # Backend services expose ports to localhost, so frontend uses:
+  # - NEXT_PUBLIC_ORCHESTRATOR_URL=http://localhost:8080
+  # - NEXT_PUBLIC_EVENTS_SERVER_URL=ws://localhost:8001/ws
+  # See frontend/.env for configuration
 
-volumes:
-  pgdata:
-    # Only used if you uncomment the local db service
+# Note: No database volumes needed - using cloud-hosted databases (Neon PostgreSQL and MongoDB Atlas)
+# All databases are accessed via connection URIs in service .env files

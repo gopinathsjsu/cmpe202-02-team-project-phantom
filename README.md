@@ -143,15 +143,20 @@ The application follows a microservices architecture with the following componen
    ```
 
 2. **Configure environment variables**
-   - Copy `.env.example` files in root and `listing-service/` directories
-   - Create `.env` files matching the example variables
-   - Configure required services:
-     - PostgreSQL connection details
-     - MongoDB URI
-     - Redis connection
-     - RabbitMQ URL
-     - Google Gemini API key
-     - Azure Blob Storage credentials
+   - **Root `.env` file** (for docker-compose port mappings):
+     - Copy `.env.example` to `.env` in the root directory
+     - This file contains port variables used by docker-compose.yml for port mappings
+     - Variables: `PORT`, `LISTING_PORT`, `EVENTS_PORT`
+   - **Service-specific `.env` files** (for service configuration):
+     - Copy `.env.example` files in each service directory (`orchestrator/`, `listing-service/`, `events-server/`, `chat-consumer/`)
+     - Create `.env` files matching the example variables
+     - Configure required services:
+       - PostgreSQL connection details
+       - MongoDB URI
+       - Redis connection
+       - RabbitMQ URL
+       - Google Gemini API key
+       - Azure Blob Storage credentials
 
 3. **Start all services**
    ```bash
