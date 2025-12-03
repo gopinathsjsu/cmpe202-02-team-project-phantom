@@ -1,49 +1,4 @@
 services:
-  # ------------------------------------------------------------------
-  # OPTIONAL: Local Postgres + seeder (NOT used when connecting to Neon)
-  # ------------------------------------------------------------------
-  # db:
-  #   container_name: db
-  #   image: postgres:16
-  #   restart: unless-stopped
-  #   env_file: .env
-  #   environment:
-  #     POSTGRES_USER: ${DB_USER}
-  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
-  #     POSTGRES_DB: ${DB_NAME}
-  #   ports:
-  #     - "${DB_PORT}:${DB_PORT}"
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-  #     interval: 3s
-  #     timeout: 3s
-  #     retries: 20
-  # 
-  # db-seeder:
-  #   image: postgres:16
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./database:/seed
-  #   env_file:
-  #     - .env
-  #   command: >
-  #     bash -lc "
-  #       echo 'Waiting for Postgres: ';
-  #       echo $$DB_NAME;
-  #       until pg_isready -h $$DB_HOST -U $$DB_USER -d $$DB_NAME; do sleep 1; done;
-  #       export PGPASSWORD=\"$$DB_PASSWORD\";
-  #       echo 'Running SQL seed files.';
-  #       for f in ./seed/*.sql; do
-  #         echo 'Executing' $$f;
-  #         psql -h $$DB_HOST -U $$DB_USER -d $$DB_NAME -v ON_ERROR_STOP=1 -1 -f \"$$f\";
-  #       done;
-  #       echo 'All seed files executed successfully.';
-  #     "
-
   mongo:
     image: mongo:7
     healthcheck:
@@ -72,7 +27,6 @@ services:
       dockerfile: ./listing-service/Dockerfile
     container_name: listing-service
     env_file:
-      - ./.env
       - ./listing-service/.env
     environment:
       # This will come from your .env and should point to Neon
@@ -88,13 +42,14 @@ services:
       dockerfile: ./orchestrator/Dockerfile
     container_name: orchestrator
     env_file:
-      - ./.env
       - ./orchestrator/.env
     ports:
       - "${ORCHESTRATOR_PORT}:${ORCHESTRATOR_PORT}"
     environment:
       # Use a single DATABASE_URL from .env (Neon)
       DATABASE_URL: ${DATABASE_URL}
+      # Orchestrator expects PORT env var, map from ORCHESTRATOR_PORT
+      PORT: ${ORCHESTRATOR_PORT}
     depends_on:
       mongo:
         condition: service_healthy
@@ -108,20 +63,21 @@ services:
       dockerfile: ./events-server/Dockerfile
     container_name: events-server
     env_file:
-      - ./.env
       - ./events-server/.env
     environment:
-      # Server
-      PORT: ":8001"   
+      # Server port - format should include colon prefix (e.g., ":8001")
+      # EVENTS_SERVER_PORT should be just the number (e.g., "8001")
+      PORT: ":${EVENTS_SERVER_PORT}"
     ports:
-      - "8001:8001"
+      - "${EVENTS_SERVER_PORT}:${EVENTS_SERVER_PORT}"
     depends_on:
       - redis
       - rabbitmq
       - orchestrator
     healthcheck:
       # No /health route shown, so do a TCP check
-      test: ["CMD", "sh", "-c", "nc -z localhost 8001"]
+      # PORT format is ":8001", so we extract the number part
+      test: ["CMD", "sh", "-c", "nc -z localhost $${PORT#:}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -131,29 +87,29 @@ services:
       context: .
       dockerfile: ./chat-consumer/Dockerfile
     env_file:
-      - ./.env
       - ./chat-consumer/.env
     depends_on:
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped      # typical for background jobs
 
-  frontend:
-    build:
-      context: .
-      dockerfile: ./frontend/Dockerfile
-    container_name: frontend
-    ports:
-      - "3000:3000"
-    environment:
-      NODE_ENV: production
-    depends_on:
-      - orchestrator
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # frontend:
+  #   build:
+  #     context: .
+  #     dockerfile: ./frontend/Dockerfile
+  #   container_name: frontend
+  #   ports:
+  #     - "${FRONTEND_PORT:-3000}:${FRONTEND_PORT:-3000}"
+  #   environment:
+  #     NODE_ENV: production
+  #     PORT: ${FRONTEND_PORT:-3000}
+  #   depends_on:
+  #     - orchestrator
+  #   healthcheck:
+  #     test: ["CMD", "sh", "-c", "wget -qO- http://localhost:$${PORT:-3000}/"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
 
 volumes:
   pgdata:
