@@ -143,6 +143,7 @@ services:
     restart: unless-stopped      # typical for background jobs
 
   frontend:
+    image: danlamgcm/frontend:latest
     build:
       context: .
       dockerfile: ./frontend/Dockerfile
