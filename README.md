@@ -1,10 +1,19 @@
 [![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/VM5AL9S5)
 
+# Quick Links
+[UI-Wireframes Folder](Project-Journal/ui-wireframes/)
+[Weekly Scrum Report](Project-Journal/Weekly%20Scrum%20Report.md)
+[XP Values](Project-Journal/XPValues.md)
+[Scrum Backlog and Burndown Charts Google Sheet](https://docs.google.com/spreadsheets/d/1D12PLO67nH4E2KtAujLxz88DP8UMz1MJgKTrcg9MsaY/edit?usp=sharing)
+
 # Campus Marketplace - Phantom
 
 A campus-only marketplace platform similar to Facebook Marketplace, designed exclusively for students to buy and sell textbooks, gadgets, essentials, and non-essentials within their campus community.
 
+# Diagrams
 ![Project System Design](https://i.imgur.com/vmw49xm.png)
+![Component Diagram](Project-Journal/uml-diagrams/Component%20Diagram%20-%20Campus%20Marketplace.png)
+![Deployment Diagram](Project-Journal/uml-diagrams/Deployment%20Diagram%20-%20Campus%20Marketplace.png)
 
 ## Team Information
 
