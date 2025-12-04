@@ -152,10 +152,13 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
+      # Set orchestrator URL for browser-side API calls
+      # Uses exposed port on host machine since browser runs client-side
+      NEXT_PUBLIC_ORCHESTRATOR_URL: http://3.17.68.221:${ORCHESTRATOR_PORT:-8080}
     depends_on:
       - orchestrator
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      test: ["CMD", "wget", "-qO-", "http://3.17.68.221:3000/"]
       interval: 10s
       timeout: 5s
       retries: 5
