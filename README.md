@@ -2,8 +2,11 @@
 
 # Quick Links
 [UI-Wireframes Folder](Project-Journal/ui-wireframes/)
+
 [Weekly Scrum Report](Project-Journal/Weekly%20Scrum%20Report.md)
+
 [XP Values](Project-Journal/XPValues.md)
+
 [Scrum Backlog and Burndown Charts Google Sheet](https://docs.google.com/spreadsheets/d/1D12PLO67nH4E2KtAujLxz88DP8UMz1MJgKTrcg9MsaY/edit?usp=sharing)
 
 # Campus Marketplace - Phantom
