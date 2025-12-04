@@ -12,7 +12,7 @@ new_users AS (
     'user_' || gs               AS user_name,
     'user' || gs || '@sjsu.edu' AS email,
     -- user_1 is admin (role = 1), others normal (role = 0)
-    CASE WHEN gs = 1 THEN '1' ELSE '0' END AS role,
+    CASE WHEN gs = 1 THEN '0' ELSE '1' END AS role,
     jsonb_build_object(
       'Email', 'user' || gs || '@sjsu.edu'
     ) AS contact
