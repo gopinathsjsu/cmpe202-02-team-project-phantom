@@ -242,12 +242,6 @@ make mongo     # MongoDB shell
 - **UI/UX**: Price range filters, sequential AI chat, search improvements
 - **Database Seeding**: Seed data generation for testing
 
-## Project Artifacts
-
-- **Project Journal**: [Project-Journal/Weekly Scrum Report.md](./Project-Journal/Weekly%20Scrum%20Report.md)
-- **Project Board/Backlog**: [Link to Google Sheet or Project Board](#) *(To be added)*
-- **System Architecture Diagram**: [View Diagram](https://i.imgur.com/vmw49xm.png)
-
 ## Design Decisions
 
 ### Microservices Architecture
