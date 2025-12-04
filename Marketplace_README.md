@@ -241,7 +241,7 @@ EVENTS_WS_URL=ws://events-server:9090/ws
 
 # UML Diagrams
 
-![Component Diagram](Project-Journal/uml-diagrams/Component%20Diagram%20-%20Campus%20Marketplace.pngcomponent-diagram.png)
+![Component Diagram](Project-Journal/uml-diagrams/Component%20Diagram%20-%20Campus%20Marketplace.png)
 ![Component Diagram](Project-Journal/uml-diagrams/Deployment%20Diagram%20-%20Campus%20Marketplace.png)
 
 ---
