@@ -97,11 +97,24 @@ services:
     environment:
       # Use a single DATABASE_URL from .env (Neon)
       DATABASE_URL: ${DATABASE_URL}
+      # MongoDB connection using Docker service name
+      CHAT_MONGO_URI: ${CHAT_MONGO_URI:-mongodb://mongo:27017/chatdb}
+      # RabbitMQ connection using Docker service name
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      RABBITMQ_QUEUE_NAME: ${RABBITMQ_QUEUE_NAME:-chat_messages}
+      # Listing service connection using Docker service name
+      LISTING_SERVICE_URL: ${LISTING_SERVICE_URL:-http://listing-service:${LISTING_PORT:-8080}}
+      LISTING_SERVICE_SHARED_SECRET: ${LISTING_SERVICE_SHARED_SECRET}
+      # CORS allowed origins (comma-separated list)
+      # Should include your frontend URL (e.g., http://3.17.68.221:3000 or https://yourdomain.com)
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
     depends_on:
       mongo:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      listing-service:
+        condition: service_started
 
 
   events-server:
@@ -115,13 +128,29 @@ services:
       - ./events-server/.env
     environment:
       # Server
-      PORT: ":8001"   
+      PORT: ":8001"
+      # Orchestrator connection using Docker service name
+      ORCH_BASE_URL: ${ORCH_BASE_URL:-http://orchestrator:${ORCHESTRATOR_PORT:-8080}}
+      # Redis connection using Docker service name
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      # RabbitMQ connection using Docker service name
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      RABBITMQ_QUEUE_NAME: ${RABBITMQ_QUEUE_NAME:-chat_messages}
+      PRESENCE_TTL_SECONDS: ${PRESENCE_TTL_SECONDS:-60}
+      # CORS allowed origins (comma-separated list)
+      # Should include your frontend URL (e.g., http://3.17.68.221:3000 or https://yourdomain.com)
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
     ports:
       - "8001:8001"
     depends_on:
-      - redis
-      - rabbitmq
-      - orchestrator
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
     healthcheck:
       # No /health route shown, so do a TCP check
       test: ["CMD", "sh", "-c", "nc -z localhost 8001"]
@@ -137,8 +166,22 @@ services:
     env_file:
       - ./.env
       - ./chat-consumer/.env
+    environment:
+      # RabbitMQ connection using Docker service name
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      RABBITMQ_QUEUE_NAME: ${RABBITMQ_QUEUE_NAME:-chat_messages}
+      # Redis connection using Docker service name
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      # MongoDB connection using Docker service name
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/chatdb}
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      mongo:
         condition: service_healthy
     restart: unless-stopped      # typical for background jobs
 
@@ -154,11 +197,19 @@ services:
       NODE_ENV: production
       # Set orchestrator URL for browser-side API calls
       # Uses exposed port on host machine since browser runs client-side
-      NEXT_PUBLIC_ORCHESTRATOR_URL: http://3.17.68.221:${ORCHESTRATOR_PORT:-8080}
+      # NEXT_PUBLIC_ORCHESTRATOR_URL should be set to full URL (e.g., http://3.17.68.221:8080)
+      # If EXTERNAL_HOST is set, constructs URL from it; otherwise uses default IP
+      # Update the default IP (3.17.68.221) to your AWS public IP or domain
+      NEXT_PUBLIC_ORCHESTRATOR_URL: ${NEXT_PUBLIC_ORCHESTRATOR_URL:-http://${EXTERNAL_HOST:-3.17.68.221}:${ORCHESTRATOR_PORT:-8080}}
+      # Events server WebSocket URL for browser-side connections
+      # NEXT_PUBLIC_EVENTS_SERVER_URL should be set to full WebSocket URL (e.g., ws://3.17.68.221:8001/ws)
+      # If EXTERNAL_HOST is set, constructs URL from it; otherwise uses default IP
+      NEXT_PUBLIC_EVENTS_SERVER_URL: ${NEXT_PUBLIC_EVENTS_SERVER_URL:-ws://${EXTERNAL_HOST:-3.17.68.221}:8001/ws}
     depends_on:
       - orchestrator
+      - events-server
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://3.17.68.221:3000/"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
       interval: 10s
       timeout: 5s
       retries: 5

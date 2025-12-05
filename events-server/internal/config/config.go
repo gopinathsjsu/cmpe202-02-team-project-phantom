@@ -16,6 +16,7 @@ type Config struct {
 	SkipAuth            bool
 	RabbitMQURL         string
 	RabbitMQQueueName   string
+	CORSAllowedOrigins  string
 }
 
 func getenv(key string) string {
@@ -65,5 +66,6 @@ func Load() Config {
 		PresenceTTLSeconds:  getenvInt("PRESENCE_TTL_SECONDS"),
 		RabbitMQURL:         getenv("RABBITMQ_URL"),
 		RabbitMQQueueName:   getenv("RABBITMQ_QUEUE_NAME"),
+		CORSAllowedOrigins:  getenvOptional("CORS_ALLOWED_ORIGINS"), // Optional: defaults to localhost if not set
 	}
 }

@@ -40,8 +40,22 @@ func readConnection(hub *wsx.Hub, pres presence.PresenceStore, authc auth.AuthCl
 		// Set CORS headers for WebSocket upgrade (Safari requires this)
 		origin := r.Header.Get("Origin")
 		if origin != "" {
-			// Allow localhost origins for development
-			if strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "https://localhost:") {
+			allowed := false
+			// Check against configured allowed origins
+			if cfg.CORSAllowedOrigins != "" {
+				origins := strings.Split(cfg.CORSAllowedOrigins, ",")
+				for _, o := range origins {
+					if strings.TrimSpace(o) == origin {
+						allowed = true
+						break
+					}
+				}
+			}
+			// Allow localhost origins for development (fallback)
+			if !allowed && (strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "https://localhost:")) {
+				allowed = true
+			}
+			if allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 			}
 		}
