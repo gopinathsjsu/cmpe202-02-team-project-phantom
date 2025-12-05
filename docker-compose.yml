@@ -44,13 +44,16 @@ services:
   #       echo 'All seed files executed successfully.';
   #     "
 
-  mongo:
-    image: mongo:7
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+  # ------------------------------------------------------------------
+  # OPTIONAL: Local MongoDB (NOT used when connecting to MongoDB Atlas)
+  # ------------------------------------------------------------------
+  # mongo:
+  #   image: mongo:7
+  #   healthcheck:
+  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -97,8 +100,10 @@ services:
     environment:
       # Use a single DATABASE_URL from .env (Neon)
       DATABASE_URL: ${DATABASE_URL}
-      # MongoDB connection using Docker service name
-      CHAT_MONGO_URI: ${CHAT_MONGO_URI:-mongodb://mongo:27017/chatdb}
+      # MongoDB Atlas connection string (optional)
+      # Format: mongodb+srv://username:password@cluster.mongodb.net/chatdb?retryWrites=true&w=majority
+      # Set CHAT_MONGO_URI in .env file to your MongoDB Atlas connection string
+      CHAT_MONGO_URI: ${CHAT_MONGO_URI}
       # RabbitMQ connection using Docker service name
       RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
       RABBITMQ_QUEUE_NAME: ${RABBITMQ_QUEUE_NAME:-chat_messages}
@@ -109,8 +114,6 @@ services:
       # Should include your frontend URL (e.g., http://3.17.68.221:3000 or https://yourdomain.com)
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
     depends_on:
-      mongo:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       listing-service:
@@ -174,15 +177,15 @@ services:
       REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
-      # MongoDB connection using Docker service name
-      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/chatdb}
+      # MongoDB Atlas connection string (required for chat-consumer)
+      # Format: mongodb+srv://username:password@cluster.mongodb.net/chatdb?retryWrites=true&w=majority
+      # Set MONGO_URI in .env file to your MongoDB Atlas connection string
+      MONGO_URI: ${MONGO_URI}
     depends_on:
       rabbitmq:
         condition: service_healthy
       redis:
         condition: service_started
-      mongo:
-        condition: service_healthy
     restart: unless-stopped      # typical for background jobs
 
   frontend:
