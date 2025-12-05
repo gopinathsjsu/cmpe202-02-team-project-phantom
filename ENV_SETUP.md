@@ -2,22 +2,13 @@
 
 This document explains all environment variables needed for the Docker Compose deployment.
 
-## .env File Locations
+## .env File Location
 
 ### Primary .env File
 **Location**: `.env` (root directory)  
 **Path**: `/Users/danlam/Desktop/School/Personal/CMPE202Project/Actual/cmpe202-02-team-project-phantom/.env`
 
-This is the main environment file used by `docker-compose.yml`. All services read from this file.
-
-### Service-Specific .env Files (Optional)
-These are optional and provide service-specific overrides:
-- `./orchestrator/.env` - Orchestrator service overrides
-- `./listing-service/.env` - Listing service overrides
-- `./events-server/.env` - Events server overrides
-- `./chat-consumer/.env` - Chat consumer overrides
-
-**Note**: Service-specific .env files are merged with the root .env file by docker-compose.
+This is the **only** environment file used by `docker-compose.yml`. All services read from this single `.env` file. There are no service-specific `.env` files - all environment variables are centralized in the root `.env` file.
 
 ## Quick Start
 
@@ -153,8 +144,9 @@ To override, modify `docker-compose.yml` frontend service environment section.
 
 ## Service-Specific Variable Breakdown
 
+All variables below should be defined in the root `.env` file.
+
 ### Orchestrator Service
-**Location**: `./orchestrator/.env` (optional override)
 
 Required:
 - `DATABASE_URL`
@@ -171,7 +163,6 @@ Optional:
 - `PORT`
 
 ### Listing Service
-**Location**: `./listing-service/.env` (optional override)
 
 Required:
 - `DATABASE_URL`
@@ -186,7 +177,6 @@ Optional:
 - `LISTING_PORT`
 
 ### Events Server
-**Location**: `./events-server/.env` (optional override)
 
 Required:
 - `PORT`
@@ -202,7 +192,6 @@ Optional:
 - `CORS_ALLOWED_ORIGINS`
 
 ### Chat Consumer
-**Location**: `./chat-consumer/.env` (optional override)
 
 Required:
 - `MONGO_URI`

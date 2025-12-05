@@ -11,9 +11,6 @@ RUN cd events-server && go mod download
 COPY events-server/ ./events-server/
 COPY http-lib/ ./http-lib/
 
-# Placed since the code explictly calls for an .env file or log.fatal
-COPY events-server/.env ./events-server/.env
-
 WORKDIR /app/events-server
 
 RUN go mod tidy

@@ -143,8 +143,8 @@ The application follows a microservices architecture with the following componen
    ```
 
 2. **Configure environment variables**
-   - Copy `.env.example` files in root and `listing-service/` directories
-   - Create `.env` files matching the example variables
+   - Copy `.env.example` file in root directory to `.env`
+   - Configure all required environment variables in the root `.env` file (see ENV_SETUP.md for details)
    - Configure required services:
      - PostgreSQL connection details
      - MongoDB URI

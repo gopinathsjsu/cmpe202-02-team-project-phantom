@@ -77,7 +77,6 @@ services:
     container_name: listing-service
     env_file:
       - ./.env
-      - ./listing-service/.env
     environment:
       # This will come from your .env and should point to Neon
       DATABASE_URL: ${DATABASE_URL}
@@ -94,7 +93,6 @@ services:
     container_name: orchestrator
     env_file:
       - ./.env
-      - ./orchestrator/.env
     ports:
       - "${ORCHESTRATOR_PORT}:${ORCHESTRATOR_PORT}"
     environment:
@@ -128,7 +126,6 @@ services:
     container_name: events-server
     env_file:
       - ./.env
-      - ./events-server/.env
     environment:
       # Server
       PORT: ":8001"
@@ -168,7 +165,6 @@ services:
       dockerfile: ./chat-consumer/Dockerfile
     env_file:
       - ./.env
-      - ./chat-consumer/.env
     environment:
       # RabbitMQ connection using Docker service name
       RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
